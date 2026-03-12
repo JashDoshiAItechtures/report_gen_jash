@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI SQL Analyst — Intelligent Data Explorer</title>
+    <meta name="description" content="Ask natural-language questions about your database and get instant SQL, results, and insights." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+    <!-- ── Background particles ─────────────────────────────────────── -->
+    <div class="bg-effects">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+
+    <div class="container">
+
+        <!-- ── Header ───────────────────────────────────────────────── -->
+        <header class="header">
+            <div class="logo">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                        <path d="M2 17l10 5 10-5"/>
+                        <path d="M2 12l10 5 10-5"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1>AI SQL Analyst</h1>
+                    <p class="tagline">Intelligent Data Explorer</p>
+                </div>
+            </div>
+
+            <!-- ── Model Switcher ──────────────────────────────────── -->
+            <div class="model-switcher">
+                <span class="switcher-label">Model</span>
+                <div class="switcher-track" id="modelSwitcher">
+                    <button class="switcher-btn active" data-provider="groq">
+                        <span class="btn-dot"></span>
+                        Groq
+                    </button>
+                    <button class="switcher-btn" data-provider="openai">
+                        <span class="btn-dot"></span>
+                        OpenAI
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- ── Input Section ────────────────────────────────────────── -->
+        <section class="input-section">
+            <div class="input-card glass">
+                <label for="questionInput" class="input-label">
+                    Ask a question about your data
+                </label>
+                <div class="input-wrapper">
+                    <textarea
+                        id="questionInput"
+                        rows="3"
+                        placeholder="e.g. What are the top 10 customers by total revenue?"
+                        spellcheck="false"
+                    ></textarea>
+                    <button id="submitBtn" class="submit-btn" title="Send question">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13"/>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── Loading ──────────────────────────────────────────────── -->
+        <div id="loadingIndicator" class="loading hidden">
+            <div class="loading-content">
+                <div class="spinner"></div>
+                <p class="loading-text">Reasoning about your question…</p>
+                <div class="loading-steps">
+                    <span class="step active">Understanding</span>
+                    <span class="step-arrow">→</span>
+                    <span class="step">Analyzing Schema</span>
+                    <span class="step-arrow">→</span>
+                    <span class="step">Planning Query</span>
+                    <span class="step-arrow">→</span>
+                    <span class="step">Generating SQL</span>
+                    <span class="step-arrow">→</span>
+                    <span class="step">Executing</span>
+                    <span class="step-arrow">→</span>
+                    <span class="step">Interpreting</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Results Section ──────────────────────────────────────── -->
+        <div id="resultsSection" class="results-section hidden">
+
+            <!-- SQL Card -->
+            <div class="result-card glass" id="sqlCard">
+                <div class="card-header">
+                    <div class="card-icon sql-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="16 18 22 12 16 6"/>
+                            <polyline points="8 6 2 12 8 18"/>
+                        </svg>
+                    </div>
+                    <h2>Generated SQL</h2>
+                    <button class="copy-btn" id="copySqlBtn" title="Copy SQL">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2"/>
+                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                        </svg>
+                    </button>
+                </div>
+                <pre class="sql-code"><code id="sqlOutput"></code></pre>
+            </div>
+
+            <!-- Data Card -->
+            <div class="result-card glass" id="dataCard">
+                <div class="card-header">
+                    <div class="card-icon data-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <ellipse cx="12" cy="5" rx="9" ry="3"/>
+                            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+                            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+                        </svg>
+                    </div>
+                    <h2>Query Results</h2>
+                    <span class="row-count" id="rowCount"></span>
+                </div>
+                <div class="table-wrapper" id="tableWrapper">
+                    <!-- Table injected by JS -->
+                </div>
+            </div>
+
+            <!-- Answer Card -->
+            <div class="result-card glass" id="answerCard">
+                <div class="card-header">
+                    <div class="card-icon answer-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+                        </svg>
+                    </div>
+                    <h2>Explanation</h2>
+                </div>
+                <p class="answer-text" id="answerOutput"></p>
+            </div>
+
+            <!-- Insights Card -->
+            <div class="result-card glass" id="insightsCard">
+                <div class="card-header">
+                    <div class="card-icon insights-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2a7 7 0 017 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 01-1 1H9a1 1 0 01-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 017-7z"/>
+                            <line x1="9" y1="21" x2="15" y2="21"/>
+                        </svg>
+                    </div>
+                    <h2>Insights</h2>
+                </div>
+                <div class="insights-text" id="insightsOutput"></div>
+            </div>
+
+        </div>
+
+        <!-- ── Error ────────────────────────────────────────────────── -->
+        <div id="errorSection" class="error-section hidden">
+            <div class="result-card glass error-card">
+                <div class="card-header">
+                    <div class="card-icon error-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="15" y1="9" x2="9" y2="15"/>
+                            <line x1="9" y1="9" x2="15" y2="15"/>
+                        </svg>
+                    </div>
+                    <h2>Error</h2>
+                </div>
+                <p class="error-text" id="errorOutput"></p>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
