@@ -1,3 +1,4 @@
+---
 title: sqlbot
 emoji: 🧠
 colorFrom: blue
