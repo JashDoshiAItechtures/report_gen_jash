@@ -27,6 +27,7 @@ app.add_middleware(
 class QuestionRequest(BaseModel):
     question: str
     provider: str = "groq"       # "groq" | "openai"
+    conversation_id: str | None = None
 
 
 class GenerateSQLResponse(BaseModel):
@@ -54,9 +55,29 @@ def generate_sql_endpoint(req: QuestionRequest):
 @app.post("/chat", response_model=ChatResponse)
 def chat_endpoint(req: QuestionRequest):
     from ai.pipeline import SQLAnalystPipeline
+    from db.memory import get_recent_history, add_turn
+
+    conversation_id = req.conversation_id or "default"
+
+    history = get_recent_history(conversation_id, limit=5)
+
+    # Augment the question with recent conversation context
+    if history:
+        history_lines: list[str] = ["You are in a multi-turn conversation. Here are the recent exchanges:"]
+        for turn in history:
+            history_lines.append(f"User: {turn['question']}")
+            history_lines.append(f"Assistant: {turn['answer']}")
+        history_lines.append(f"Now the user asks: {req.question}")
+        question_with_context = "\n".join(history_lines)
+    else:
+        question_with_context = req.question
 
     pipeline = SQLAnalystPipeline(provider=req.provider)
-    result = pipeline.run(req.question)
+    result = pipeline.run(question_with_context)
+
+    # Persist this turn for future context
+    add_turn(conversation_id, req.question, result["answer"], result["sql"])
+
     return ChatResponse(**result)
 
 

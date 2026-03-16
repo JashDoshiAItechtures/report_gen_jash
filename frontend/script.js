@@ -25,6 +25,17 @@
     let selectedProvider  = "groq";
     let loadingStepTimer  = null;
 
+    // Persistent conversation id per browser (for multi-turn memory)
+    let conversationId = window.localStorage.getItem("sqlbot_conversation_id");
+    if (!conversationId) {
+        if (window.crypto && window.crypto.randomUUID) {
+            conversationId = window.crypto.randomUUID();
+        } else {
+            conversationId = "conv-" + Date.now().toString(36);
+        }
+        window.localStorage.setItem("sqlbot_conversation_id", conversationId);
+    }
+
     // ── Model Switcher ───────────────────────────────────────────────────
     modelSwitcher.addEventListener("click", (e) => {
         const btn = e.target.closest(".switcher-btn");
@@ -55,7 +66,11 @@
             const res = await fetch("/chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ question, provider: selectedProvider }),
+                body: JSON.stringify({
+                    question,
+                    provider: selectedProvider,
+                    conversation_id: conversationId,
+                }),
             });
 
             if (!res.ok) {
