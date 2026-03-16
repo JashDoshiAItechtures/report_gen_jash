@@ -1,40 +1,33 @@
-"""DSPy language model setup for Groq and OpenAI.
+"""DSPy language model setup for Groq (and optionally OpenAI).
 
-Provides a factory function to create the right LM based on the
-user-selected provider.
+We configure DSPy ONCE at import time on the main thread to avoid
+thread-safety issues with FastAPI's worker threads.
 """
 
 import dspy
 import config
 
 
-# Configure DSPy ONCE at import time, on the main thread, with Groq as default.
-_default_lm = dspy.LM(
-    model=f"groq/{config.GROQ_MODEL}",
-    api_key=config.GROQ_API_KEY,
-    max_tokens=4096,
-    temperature=0.2,
-)
-dspy.configure(lm=_default_lm)
+def _configure_default_lm() -> dspy.LM:
+    """Configure the global DSPy LM once and return it."""
+    lm = dspy.LM(
+        model=f"groq/{config.GROQ_MODEL}",
+        api_key=config.GROQ_API_KEY,
+        max_tokens=4096,
+        temperature=0.2,
+    )
+    dspy.configure(lm=lm)
+    return lm
+
+
+_DEFAULT_LM = _configure_default_lm()
 
 
 def get_lm(provider: str = "groq") -> dspy.LM:
-    """Return a DSPy language-model instance for the requested provider.
+    """Return the LM instance to use.
 
-    This does NOT call dspy.configure to avoid thread-safety issues;
-    the global settings are configured once at import using Groq.
-
-    Parameters
-    ----------
-    provider : "groq" | "openai"
+    NOTE: To keep things simple and robust inside the web server, we always
+    use the globally configured LM. The `provider` argument is accepted for
+    future extension but currently ignored.
     """
-    if provider == "openai":
-        return dspy.LM(
-            model=f"openai/{config.OPENAI_MODEL}",
-            api_key=config.OPENAI_API_KEY,
-            max_tokens=4096,
-            temperature=0.2,
-        )
-
-    # Default / Groq: reuse the global LM so we share configuration.
-    return _default_lm
+    return _DEFAULT_LM

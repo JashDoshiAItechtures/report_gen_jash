@@ -36,14 +36,15 @@ class SQLAnalystPipeline:
     """End-to-end reasoning pipeline: question → SQL → results → insights."""
 
     def __init__(self, provider: str = "groq"):
+        # For now we always use the globally configured LM (Groq).
         self.provider = provider
         self._lm = get_lm(provider)
 
-        # DSPy predict modules — each bound to the chosen LM instance
-        self.analyze = dspy.Predict(AnalyzeAndPlan, lm=self._lm)
-        self.generate_sql = dspy.Predict(SQLGeneration, lm=self._lm)
-        self.interpret = dspy.Predict(InterpretAndInsight, lm=self._lm)
-        self.repair = dspy.Predict(SQLRepair, lm=self._lm)
+        # DSPy predict modules — rely on global dspy.settings
+        self.analyze = dspy.Predict(AnalyzeAndPlan)
+        self.generate_sql = dspy.Predict(SQLGeneration)
+        self.interpret = dspy.Predict(InterpretAndInsight)
+        self.repair = dspy.Predict(SQLRepair)
 
     # ── public API ──────────────────────────────────────────────────────
 
