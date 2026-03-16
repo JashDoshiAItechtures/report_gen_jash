@@ -61,10 +61,21 @@ class SQLGeneration(dspy.Signature):
     The query must be syntactically correct and only reference existing
     tables and columns from the schema.
 
+    SIMPLICITY RULES (MUST FOLLOW):
+    - If a pre-computed total/summary column exists (e.g. total_amount, grand_total,
+      total_price, net_amount), SELECT THAT COLUMN DIRECTLY. NEVER reconstruct it
+      by adding component columns (e.g. gold_amount + diamond_amount) — that will give
+      wrong answers because it ignores labour, taxes, and other components.
+    - For single-record lookups (e.g. "total amount of PO12345"), write:
+        SELECT total_amount FROM <table> WHERE po_id = 'PO12345'
+      NOT a multi-table join with SUM of parts.
+    - Only JOIN tables if the required column does not exist in the primary table.
+    - Only use aggregation (SUM, COUNT, AVG, etc.) when the question genuinely asks
+      for an aggregate across multiple rows.
+
     BUSINESS RULES:
-    - Include status/state filters from the query plan for accurate metrics
-    - Use appropriate aggregation functions
-    - Ensure the query respects business logic (e.g., only closed orders for revenue)
+    - Include status/state filters from the query plan for accurate metrics.
+    - Ensure the query respects business logic (e.g., only closed orders for revenue).
 
     CRITICAL: Output ONLY the raw SQL. No markdown, no explanation, no comments."""
 
@@ -73,9 +84,9 @@ class SQLGeneration(dspy.Signature):
     query_plan = dspy.InputField(desc="Detailed logical query plan")
 
     sql_query = dspy.OutputField(
-        desc="A valid PostgreSQL SELECT query. Output ONLY the raw SQL code. "
-             "Do NOT include any explanation, comments, markdown, or text before or after the SQL. "
-             "Do NOT wrap in code fences. Just the pure SQL statement."
+        desc="The SIMPLEST valid PostgreSQL SELECT query that correctly answers the question. "
+             "Use pre-computed total columns when available. Avoid unnecessary joins and aggregations. "
+             "Output ONLY the raw SQL code — no markdown, no explanation, no code fences."
     )
 
 
