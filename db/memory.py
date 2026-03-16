@@ -63,6 +63,36 @@ def add_turn(conversation_id: str, question: str, answer: str, sql_query: str | 
         )
 
 
+def delete_turn(turn_id: int) -> None:
+    """Delete a single chat history turn by its id."""
+    _ensure_table()
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("DELETE FROM chat_history WHERE id = :id"),
+            {"id": turn_id},
+        )
+
+
+def get_full_history(conversation_id: str) -> List[Dict[str, Any]]:
+    """Return ALL turns for a conversation (oldest first) for the sidebar display."""
+    _ensure_table()
+    engine = get_engine()
+    query = text(
+        """
+        SELECT id, question, answer, sql_query, created_at
+        FROM chat_history
+        WHERE conversation_id = :conversation_id
+        ORDER BY created_at ASC
+        """
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(
+            query, {"conversation_id": conversation_id}
+        ).mappings().all()
+    return [dict(r) for r in rows]
+
+
 def get_recent_history(conversation_id: str, limit: int = 5) -> List[Dict[str, Any]]:
     """Return the most recent `limit` turns for a conversation (oldest first)."""
     _ensure_table()

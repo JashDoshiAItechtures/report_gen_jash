@@ -107,6 +107,19 @@ def chat_endpoint(req: QuestionRequest):
 
 # ── Schema info endpoint (for debugging / transparency) ─────────────────────
 
+@app.get("/history")
+def history_endpoint(conversation_id: str = "default"):
+    from db.memory import get_full_history
+    return get_full_history(conversation_id)
+
+
+@app.delete("/history/{turn_id}")
+def delete_turn_endpoint(turn_id: int):
+    from db.memory import delete_turn
+    delete_turn(turn_id)
+    return {"ok": True}
+
+
 @app.get("/schema")
 def schema_endpoint():
     from db.schema import get_schema
