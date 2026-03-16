@@ -46,7 +46,8 @@ def sync_dataframe(df: pd.DataFrame, table_name: str) -> None:
     df.columns = new_cols
 
     df.to_sql(table_name, engine, if_exists="replace", index=False)
-    print(f"  ✓ Table '{table_name}' synced — {len(df)} rows, {len(df.columns)} columns")
+    # Use plain ASCII characters to avoid Windows console encoding issues
+    print(f"  Table '{table_name}' synced - {len(df)} rows, {len(df.columns)} columns")
 
 
 def sync_excel(filepath: str) -> None:
@@ -93,7 +94,7 @@ def main() -> None:
         print(f"Path not found: {target}")
         sys.exit(1)
 
-    print("\n✓ Data sync complete.")
+    print("\nData sync complete.")
 
 
 if __name__ == "__main__":
