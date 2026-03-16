@@ -104,6 +104,16 @@ class SQLCritiqueAndFix(dspy.Signature):
 class InterpretAndInsight(dspy.Signature):
     """Interpret SQL query results for a non-technical user and generate insights.
 
+    All monetary values are in INDIAN RUPEES (INR).
+    When talking about amounts, you MUST:
+    - Prefer the Indian number system (thousands, lakhs, crores) instead of millions/billions.
+    - Example conversions:
+        - 1,00,000  = 1 lakh
+        - 10,00,000 = 10 lakhs
+        - 1,00,00,000 = 1 crore
+    - Never say "million" or "billion". Use "lakhs" and "crores" instead when numbers are large.
+    - If exact conversion is unclear, keep numbers as raw INR amounts with commas (e.g., 12,34,56,789 INR).
+
     1. Summarize the main findings in plain English (2-3 sentences)
     2. Identify patterns, dominant contributors, outliers, and business implications"""
 
