@@ -56,6 +56,27 @@ class AnalyzeAndPlan(dspy.Signature):
       → JOIN path: sales_order → sales_order_line → sales_order_line_pricing
       → Still filter by sales_order.status = 'closed'.
 
+    COMPONENT COST BY PRODUCT (diamond cost, gold cost, making charges per product):
+      → The sales_table_v2_sales_order_line_pricing table has ALL component costs
+        and quantity in ONE place. Use it exclusively for cost analysis.
+      → Correct formula:  SUM(component_amount_per_unit * quantity)
+      → Columns available:
+          diamond_amount_per_unit  → total diamond cost = SUM(diamond_amount_per_unit * quantity)
+          gold_amount_per_unit     → total gold cost    = SUM(gold_amount_per_unit * quantity)
+          making_charges_per_unit  → total making cost  = SUM(making_charges_per_unit * quantity)
+      → GROUP BY product_id for "by product", GROUP BY variant_sku for "by variant/SKU".
+      → Example — top 10 products by diamond cost:
+            SELECT product_id, SUM(diamond_amount_per_unit * quantity) AS diamond_cost
+            FROM sales_table_v2_sales_order_line_pricing
+            GROUP BY product_id
+            ORDER BY diamond_cost DESC
+            LIMIT 10
+      → NEVER use sales_order_line_diamond or sales_order_line_gold tables for cost totals.
+        Those detail tables have diamond_amount_per_unit WITHOUT quantity — using SUM on them
+        directly gives WRONG results (undercounts because it ignores how many units were ordered).
+        Use them ONLY when the question asks about specific diamond/gold properties
+        (e.g. shape, quality, karat, size, carats) — NOT for cost or revenue calculations.
+
     PURCHASE ORDER TOTALS:
       → Use: purchase_orders_v6_purchase_order.total_amount
       → For: "total amount of PO123", "PO value", "purchase order cost".
@@ -198,24 +219,40 @@ class SQLGeneration(dspy.Signature):
        - Highest/biggest/top "purchase order" → purchase_orders_v6_purchase_order ORDER BY total_amount DESC
        - Highest/biggest/top "order" or "sale" → sales_table_v2_sales_order ORDER BY total_amount DESC
 
-    3. USE PRE-COMPUTED TOTALS — NEVER RECONSTRUCT THEM:
+    3. COMPONENT COSTS (diamond/gold/making charges) — USE PRICING TABLE WITH QUANTITY:
+       - Correct table:  sales_table_v2_sales_order_line_pricing
+       - Correct formula: SUM(diamond_amount_per_unit * quantity)  for diamond cost
+                          SUM(gold_amount_per_unit * quantity)     for gold cost
+                          SUM(making_charges_per_unit * quantity)  for making charges
+       - NEVER use sales_order_line_diamond or sales_order_line_gold for cost aggregations.
+         Those tables lack quantity, so SUM(diamond_amount_per_unit) there is always WRONG.
+       - Examples:
+           Top products by diamond cost:
+             SELECT product_id, SUM(diamond_amount_per_unit * quantity) AS diamond_cost
+             FROM sales_table_v2_sales_order_line_pricing
+             GROUP BY product_id ORDER BY diamond_cost DESC LIMIT 10
+           Top SKUs by gold cost:
+             SELECT variant_sku, SUM(gold_amount_per_unit * quantity) AS gold_cost
+             FROM sales_table_v2_sales_order_line_pricing
+             GROUP BY variant_sku ORDER BY gold_cost DESC LIMIT 10
+
+    5. USE PRE-COMPUTED TOTALS — NEVER RECONSTRUCT THEM:
        - For order-level metrics (revenue, AOV): use sales_table_v2_sales_order.total_amount
        - For PO totals: use purchase_orders_v6_purchase_order.total_amount
        - NEVER add gold_amount + diamond_amount or any component columns —
          that always gives the WRONG answer (misses labour, taxes, etc.)
 
-    4. CORRECT FORMULAS:
+    6. CORRECT FORMULAS:
        - Revenue:  SELECT SUM(total_amount) FROM sales_table_v2_sales_order WHERE status = 'closed'
        - AOV:      SELECT AVG(total_amount) FROM sales_table_v2_sales_order WHERE status = 'closed'
-       - Per-product revenue: SUM(line_total) FROM sales_order_line_pricing
-                              JOIN sales_order_line JOIN sales_order WHERE status = 'closed'
+       - Per-product revenue: SUM(line_total) FROM sales_order_line_pricing (no extra JOIN needed)
 
-    5. DATE FILTERING (order_date is TEXT 'YYYY-MM-DD'):
+    7. DATE FILTERING (order_date is TEXT 'YYYY-MM-DD'):
        - Use the EXACT year values from the [CONTEXT] block in the question.
        - Use: order_date >= 'YYYY-01-01' AND order_date <= 'YYYY-12-31'
        - Do NOT use EXTRACT() or CAST() on order_date.
 
-    6. SIMPLICITY:
+    8. SIMPLICITY:
        - Single-record lookup = simple WHERE filter, no aggregation
        - Only JOIN when needed, only aggregate when needed
 
