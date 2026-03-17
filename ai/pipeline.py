@@ -10,6 +10,7 @@ Reduced from 9 stages to 4 LLM calls in the happy path:
 import json
 import logging
 import re
+from datetime import date
 from typing import Any
 
 import dspy
@@ -48,16 +49,32 @@ class SQLAnalystPipeline:
 
     # ── public API ──────────────────────────────────────────────────────
 
+    @staticmethod
+    def _build_question_with_context(question: str) -> str:
+        """Prepend today's date so the model can resolve relative time references."""
+        today = date.today()
+        current_year = today.year
+        last_year = current_year - 1
+        return (
+            f"[CONTEXT: Today is {today.isoformat()}. "
+            f"Current year = {current_year}. "
+            f"'Last year' = {last_year} ({last_year}-01-01 to {last_year}-12-31). "
+            f"'This year' = {current_year} ({current_year}-01-01 to {current_year}-12-31).]\n\n"
+            f"{question}"
+        )
+
     def run(self, question: str) -> dict[str, Any]:
         """Run the full pipeline and return {sql, data, answer, insights}."""
         schema_str = format_schema()
         rels_str = format_relationships()
         profile_str = get_data_profile()
 
+        question_with_date = self._build_question_with_context(question)
+
         # 1. Analyze & Plan (single LLM call replaces 3 former stages)
         logger.info("Stage 1 — Analyze & Plan")
         plan = self.analyze(
-            question=question,
+            question=question_with_date,
             schema_info=schema_str,
             relationships=rels_str,
             data_profile=profile_str,
@@ -78,7 +95,7 @@ class SQLAnalystPipeline:
         # 2. SQL Generation
         logger.info("Stage 2 — SQL Generation")
         sql_result = self.generate_sql(
-            question=question,
+            question=question_with_date,
             schema_info=schema_str,
             query_plan=plan_text,
         )
@@ -90,9 +107,8 @@ class SQLAnalystPipeline:
         schema_valid, schema_issues = check_sql_against_schema(sql, get_schema())
         if not schema_valid:
             logger.warning(f"Schema issues detected: {schema_issues}")
-            # Try regenerating SQL once with the issues as feedback
             sql_result = self.generate_sql(
-                question=question,
+                question=question_with_date,
                 schema_info=schema_str,
                 query_plan=plan_text + f"\n\nPREVIOUS SQL HAD ISSUES: {schema_issues}. Fix them.",
             )
@@ -120,7 +136,7 @@ class SQLAnalystPipeline:
                 sql_query=sql,
                 error_message=exec_result["error"],
                 schema_info=schema_str,
-                question=question,
+                question=question_with_date,
             )
             sql = self._clean_sql(repair_result.corrected_sql)
             is_safe, reason = validate_sql(sql)
@@ -166,8 +182,10 @@ class SQLAnalystPipeline:
         rels_str = format_relationships()
         profile_str = get_data_profile()
 
+        question_with_date = self._build_question_with_context(question)
+
         plan = self.analyze(
-            question=question,
+            question=question_with_date,
             schema_info=schema_str,
             relationships=rels_str,
             data_profile=profile_str,
@@ -186,7 +204,7 @@ class SQLAnalystPipeline:
         )
 
         sql_result = self.generate_sql(
-            question=question,
+            question=question_with_date,
             schema_info=schema_str,
             query_plan=plan_text,
         )
@@ -197,7 +215,7 @@ class SQLAnalystPipeline:
         schema_valid, schema_issues = check_sql_against_schema(sql, get_schema())
         if not schema_valid:
             sql_result = self.generate_sql(
-                question=question,
+                question=question_with_date,
                 schema_info=schema_str,
                 query_plan=plan_text + f"\n\nPREVIOUS SQL HAD ISSUES: {schema_issues}. Fix them.",
             )

@@ -69,20 +69,52 @@ class AnalyzeAndPlan(dspy.Signature):
     For product catalog or inventory questions: no status filter needed.
 
     ══════════════════════════════════════════════════════════════
+    RULE 2.5 — SALES ORDER vs PURCHASE ORDER DISAMBIGUATION
+    ══════════════════════════════════════════════════════════════
+    There are TWO completely separate order systems. NEVER confuse them.
+
+    SALES ORDERS (outgoing — what customers buy from us):
+      → Primary table: sales_table_v2_sales_order
+      → IDs start with "SO" (e.g. SO13579)
+      → Keywords: "sales order", "order", "customer order", "AOV", "revenue",
+        "highest order", "best order", "what customers spent", "order value"
+      → Example questions → sales_order table:
+          "highest order" / "biggest sale" / "top sales order" / "total revenue" / "AOV"
+
+    PURCHASE ORDERS (incoming — what we buy from vendors/suppliers):
+      → Primary table: purchase_orders_v6_purchase_order
+      → IDs start with "PO" (e.g. PO08796)
+      → Keywords: "purchase order", "PO", "vendor order", "supplier order",
+        "highest purchase order", "best PO", "what we ordered from vendors"
+      → Example questions → purchase_order table:
+          "highest purchase order" / "total PO value" / "amount of PO12345"
+
+    DISAMBIGUATION RULE:
+      - If question mentions "purchase order", "PO", "vendor" → use purchase_orders_v6 tables.
+      - If question mentions "sales order", "order", "revenue", "customer" → use sales_table_v2 tables.
+      - If ambiguous and no "purchase" keyword → default to sales_table_v2_sales_order.
+
+    ══════════════════════════════════════════════════════════════
     RULE 3 — DATE FILTERING
     ══════════════════════════════════════════════════════════════
+    The question includes a [CONTEXT] block at the top with today's date,
+    current year, and exact date ranges for "last year" and "this year".
+    ALWAYS read and use those exact date ranges from the [CONTEXT] block.
+
     The order_date column is stored as TEXT in 'YYYY-MM-DD' format.
-    Use text comparisons for date filters:
-      → "last year" (2024): order_date >= '2024-01-01' AND order_date <= '2024-12-31'
-      → "this year" (2025): order_date >= '2025-01-01' AND order_date <= '2025-12-31'
-      → "last month": use appropriate YYYY-MM-DD range.
+    Use text comparisons ONLY — never EXTRACT() or CAST():
+      → Use the ranges exactly as given in the [CONTEXT] block.
+      → "last year": order_date >= '<last_year>-01-01' AND order_date <= '<last_year>-12-31'
+      → "this year": order_date >= '<current_year>-01-01' AND order_date <= '<current_year>-12-31'
+      → "last month": use appropriate YYYY-MM-DD range relative to today's date.
 
     Steps:
-    1. Identify: is this ORDER-LEVEL or LINE-ITEM-LEVEL or PO question?
-    2. Pick the correct source column per RULE 1 above.
-    3. Identify the MINIMUM tables needed (often just one table).
-    4. Apply status and date filters as needed.
-    5. Produce the simplest correct query plan."""
+    1. READ the [CONTEXT] block to get current year and last year values.
+    2. Identify: is this SALES ORDER, PURCHASE ORDER, or LINE-ITEM question? (see Rule 2.5)
+    3. Pick the correct table and source column per RULE 1 and RULE 2.5.
+    4. Identify the MINIMUM tables needed (often just one table).
+    5. Apply status and date filters as needed using the exact dates from [CONTEXT].
+    6. Produce the simplest correct query plan."""
 
     question = dspy.InputField(desc="The user's natural-language question")
     schema_info = dspy.InputField(desc="Full database schema with table names, columns, and types")
@@ -109,23 +141,34 @@ class SQLGeneration(dspy.Signature):
 
     CRITICAL RULES:
 
-    1. USE PRE-COMPUTED TOTALS — NEVER RECONSTRUCT THEM:
+    0. READ THE [CONTEXT] BLOCK IN THE QUESTION:
+       - It tells you today's date, current year, and exact date ranges for "last year"/"this year".
+       - Always use those exact year values. NEVER guess the year.
+
+    1. SALES ORDER vs PURCHASE ORDER — NEVER CONFUSE THEM:
+       - "purchase order", "PO", "vendor" → purchase_orders_v6_purchase_order table
+       - "sales order", "order", "revenue", "AOV", "highest order" (without "purchase") → sales_table_v2_sales_order table
+       - Highest/biggest/top "purchase order" → purchase_orders_v6_purchase_order ORDER BY total_amount DESC
+       - Highest/biggest/top "order" or "sale" → sales_table_v2_sales_order ORDER BY total_amount DESC
+
+    2. USE PRE-COMPUTED TOTALS — NEVER RECONSTRUCT THEM:
        - For order-level metrics (revenue, AOV): use sales_table_v2_sales_order.total_amount
        - For PO totals: use purchase_orders_v6_purchase_order.total_amount
        - NEVER add gold_amount + diamond_amount or any component columns —
          that always gives the WRONG answer (misses labour, taxes, etc.)
 
-    2. CORRECT FORMULAS:
+    3. CORRECT FORMULAS:
        - Revenue:  SELECT SUM(total_amount) FROM sales_table_v2_sales_order WHERE status = 'closed'
        - AOV:      SELECT AVG(total_amount) FROM sales_table_v2_sales_order WHERE status = 'closed'
        - Per-product revenue: SUM(line_total) FROM sales_order_line_pricing
                               JOIN sales_order_line JOIN sales_order WHERE status = 'closed'
 
-    3. DATE FILTERING (order_date is TEXT 'YYYY-MM-DD'):
+    4. DATE FILTERING (order_date is TEXT 'YYYY-MM-DD'):
+       - Use the EXACT year values from the [CONTEXT] block in the question.
        - Use: order_date >= 'YYYY-01-01' AND order_date <= 'YYYY-12-31'
-       - Do NOT use EXTRACT() or CAST() on order_date
+       - Do NOT use EXTRACT() or CAST() on order_date.
 
-    4. SIMPLICITY:
+    5. SIMPLICITY:
        - Single-record lookup = simple WHERE filter, no aggregation
        - Only JOIN when needed, only aggregate when needed
 
