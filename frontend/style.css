@@ -423,6 +423,65 @@ body {
     margin-top: -0.5rem;
 }
 
+.modal-table-wrapper {
+    overflow-x: auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+}
+
+.modal-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+    font-family: var(--font-mono);
+}
+
+.modal-table thead th {
+    background: rgba(16,185,129,0.08);
+    color: var(--accent-emerald);
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.55rem 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border-subtle);
+    white-space: nowrap;
+}
+
+.modal-table tbody tr {
+    border-bottom: 1px solid var(--border-subtle);
+    transition: background var(--transition-fast);
+}
+
+.modal-table tbody tr:last-child {
+    border-bottom: none;
+}
+
+.modal-table tbody tr:hover {
+    background: rgba(16,185,129,0.04);
+}
+
+.modal-table tbody td {
+    padding: 0.5rem 0.75rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.modal-no-data {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    padding: 0.75rem 1rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    margin: 0;
+}
+
 /* ── Background Effects ─────────────────────────────────────────────────── */
 
 .bg-effects {

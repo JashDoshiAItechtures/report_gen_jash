@@ -99,8 +99,14 @@ def chat_endpoint(req: QuestionRequest):
         (result.get("sql") or "").replace("\n", " ")[:200],
     )
 
-    # Persist this turn for future context
-    add_turn(conversation_id, req.question, result["answer"], result["sql"])
+    # Persist this turn for future context (store up to 200 rows so modal can show them)
+    add_turn(
+        conversation_id,
+        req.question,
+        result["answer"],
+        result["sql"],
+        query_result=(result["data"][:200] if result.get("data") else None),
+    )
 
     return ChatResponse(**result)
 

@@ -145,6 +145,27 @@
     }
 
     // ── History modal ─────────────────────────────────────────────────────
+    function buildModalTable(rows) {
+        if (!rows || rows.length === 0) return '<p class="modal-no-data">No data returned.</p>';
+        const cols = Object.keys(rows[0]);
+        let html = '<div class="modal-table-wrapper"><table class="modal-table"><thead><tr>';
+        cols.forEach(c => { html += `<th>${escapeHtml(c)}</th>`; });
+        html += "</tr></thead><tbody>";
+        rows.forEach(row => {
+            html += "<tr>";
+            cols.forEach(c => {
+                const val = row[c];
+                html += `<td>${escapeHtml(val === null || val === undefined ? "NULL" : String(val))}</td>`;
+            });
+            html += "</tr>";
+        });
+        html += "</tbody></table></div>";
+        if (rows.length === 200) {
+            html += '<p class="modal-no-data" style="margin-top:0.5rem;">Showing first 200 rows.</p>';
+        }
+        return html;
+    }
+
     function openHistoryModal(turn) {
         modalTitle.textContent = turn.question.length > 60
             ? turn.question.slice(0, 60) + "…"
@@ -152,6 +173,9 @@
 
         const date = new Date(turn.created_at);
         const timeStr = date.toLocaleString();
+
+        const rowCount = turn.query_result ? turn.query_result.length : 0;
+        const rowLabel = rowCount === 1 ? "1 row" : `${rowCount} rows`;
 
         modalBody.innerHTML = `
             <div class="modal-section">
@@ -163,6 +187,10 @@
                 <span class="modal-section-label">Generated SQL</span>
                 <div class="modal-section-content modal-sql">${escapeHtml(turn.sql_query)}</div>
             </div>` : ""}
+            <div class="modal-section">
+                <span class="modal-section-label">Query Result${turn.query_result ? ` · ${rowLabel}` : ""}</span>
+                ${buildModalTable(turn.query_result)}
+            </div>
             <div class="modal-section">
                 <span class="modal-section-label">AI Explanation</span>
                 <div class="modal-section-content">${escapeHtml(turn.answer)}</div>
