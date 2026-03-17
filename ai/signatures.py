@@ -69,6 +69,44 @@ class AnalyzeAndPlan(dspy.Signature):
     For product catalog or inventory questions: no status filter needed.
 
     ══════════════════════════════════════════════════════════════
+    RULE 1.5 — AGGREGATION GRANULARITY (CRITICAL)
+    ══════════════════════════════════════════════════════════════
+    The word used in the question determines the GROUP BY level.
+    NEVER add extra columns to GROUP BY beyond what the question asks for.
+
+    PRODUCT vs VARIANT vs SKU:
+      • "by product" / "per product" / "top products"
+          → GROUP BY product_id ONLY
+          → product_id is the product-level key (e.g. PROD-0020)
+          → A product has MANY variants/SKUs — grouping by variant_sku too
+            will give per-variant rows, NOT per-product rows (WRONG).
+          → There is no separate product name column in this database.
+            Use product_id as the product identifier.
+      • "by variant" / "per variant" / "by SKU" / "per SKU"
+          → GROUP BY variant_sku  (and optionally product_id)
+          → variant_sku is the fine-grained key (e.g. 105186-14K-Q12-IGI)
+      • "with product names" when asked alongside "by product"
+          → Still GROUP BY product_id — do NOT add variant_sku to GROUP BY.
+            product_id IS the product name in this database.
+
+    CUSTOMER:
+      • "by customer" / "per customer" / "top customers"
+          → GROUP BY sales_table_v2_customer_master.customer_id
+          → JOIN customer_master to get customer_name
+
+    VENDOR:
+      • "by vendor" / "per vendor" / "top vendors"
+          → GROUP BY vendor_id (or vendor_name if available in the table)
+
+    ORDER:
+      • "by order" / "per order"
+          → GROUP BY so_id (sales) or po_id (purchase)
+
+    GENERAL RULE: Match the GROUP BY exactly to the entity noun in the question.
+    Never silently add extra columns (like variant_sku) when the question says "product".
+    Never group at a finer granularity than what was asked.
+
+    ══════════════════════════════════════════════════════════════
     RULE 2.5 — SALES ORDER vs PURCHASE ORDER DISAMBIGUATION
     ══════════════════════════════════════════════════════════════
     There are TWO completely separate order systems. NEVER confuse them.
@@ -127,7 +165,7 @@ class AnalyzeAndPlan(dspy.Signature):
     join_conditions = dspy.OutputField(desc="JOIN conditions to use, or 'none'")
     where_conditions = dspy.OutputField(desc="WHERE conditions including status/date filters, or 'none'")
     aggregations = dspy.OutputField(desc="Aggregation functions to apply, or 'none'")
-    group_by = dspy.OutputField(desc="GROUP BY columns, or 'none'")
+    group_by = dspy.OutputField(desc="GROUP BY columns matching the exact entity in the question (e.g. product_id for 'by product', variant_sku for 'by variant', customer_id for 'by customer'), or 'none'")
     order_by = dspy.OutputField(desc="ORDER BY clause, or 'none'")
     limit_val = dspy.OutputField(desc="LIMIT value, or 'none'")
 
@@ -145,30 +183,39 @@ class SQLGeneration(dspy.Signature):
        - It tells you today's date, current year, and exact date ranges for "last year"/"this year".
        - Always use those exact year values. NEVER guess the year.
 
-    1. SALES ORDER vs PURCHASE ORDER — NEVER CONFUSE THEM:
+    1. GROUP BY GRANULARITY — MATCH EXACTLY TO THE QUESTION'S ENTITY:
+       - "by product" / "top products"     → GROUP BY product_id  (NOT variant_sku, NOT both)
+       - "by variant" / "by SKU"           → GROUP BY variant_sku
+       - "by customer" / "top customers"   → GROUP BY customer_id  (JOIN for customer_name)
+       - "by vendor"  / "top vendors"      → GROUP BY vendor_id or vendor_name
+       - "by order"                        → GROUP BY so_id or po_id
+       Adding extra columns to GROUP BY (e.g. variant_sku when question says "product")
+       is ALWAYS WRONG — it fragments results into variant-level rows.
+
+    2. SALES ORDER vs PURCHASE ORDER — NEVER CONFUSE THEM:
        - "purchase order", "PO", "vendor" → purchase_orders_v6_purchase_order table
        - "sales order", "order", "revenue", "AOV", "highest order" (without "purchase") → sales_table_v2_sales_order table
        - Highest/biggest/top "purchase order" → purchase_orders_v6_purchase_order ORDER BY total_amount DESC
        - Highest/biggest/top "order" or "sale" → sales_table_v2_sales_order ORDER BY total_amount DESC
 
-    2. USE PRE-COMPUTED TOTALS — NEVER RECONSTRUCT THEM:
+    3. USE PRE-COMPUTED TOTALS — NEVER RECONSTRUCT THEM:
        - For order-level metrics (revenue, AOV): use sales_table_v2_sales_order.total_amount
        - For PO totals: use purchase_orders_v6_purchase_order.total_amount
        - NEVER add gold_amount + diamond_amount or any component columns —
          that always gives the WRONG answer (misses labour, taxes, etc.)
 
-    3. CORRECT FORMULAS:
+    4. CORRECT FORMULAS:
        - Revenue:  SELECT SUM(total_amount) FROM sales_table_v2_sales_order WHERE status = 'closed'
        - AOV:      SELECT AVG(total_amount) FROM sales_table_v2_sales_order WHERE status = 'closed'
        - Per-product revenue: SUM(line_total) FROM sales_order_line_pricing
                               JOIN sales_order_line JOIN sales_order WHERE status = 'closed'
 
-    4. DATE FILTERING (order_date is TEXT 'YYYY-MM-DD'):
+    5. DATE FILTERING (order_date is TEXT 'YYYY-MM-DD'):
        - Use the EXACT year values from the [CONTEXT] block in the question.
        - Use: order_date >= 'YYYY-01-01' AND order_date <= 'YYYY-12-31'
        - Do NOT use EXTRACT() or CAST() on order_date.
 
-    5. SIMPLICITY:
+    6. SIMPLICITY:
        - Single-record lookup = simple WHERE filter, no aggregation
        - Only JOIN when needed, only aggregate when needed
 
