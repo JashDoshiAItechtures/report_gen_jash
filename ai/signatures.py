@@ -10,33 +10,79 @@ Consolidated from 8 signatures down to 4 to minimize LLM round-trips:
 import dspy
 
 
-# ── 1. Analyze & Plan (combines 3 former stages) ───────────────────────────
+# ── 1. Analyze & Plan ──────────────────────────────────────────────────────────
 
 class AnalyzeAndPlan(dspy.Signature):
     """You are an expert SQL analyst with strong business intelligence skills.
     Given a user question, a database schema, and a DATA PROFILE showing actual
     values in the database, analyze the question and produce a detailed query plan.
 
-    CRITICAL BUSINESS RULES — you MUST follow these:
-    1. When calculating revenue, sales, or monetary metrics, ONLY include
-       records with a completed/closed/successful status. Filter out cancelled,
-       pending, open, returned, or failed records.
-    2. Look at the data profile to see which status/categorical values exist
-       and decide which ones represent VALID/COMPLETED transactions.
-    3. For AOV (Average Order Value), divide total revenue of CLOSED orders
-       by the COUNT of CLOSED orders only.
-    4. When a column like 'status' exists, ALWAYS consider whether filtering
-       by status is needed for accurate business metrics.
-    5. For inventory/stock metrics, consider item states appropriately.
-    6. When computing counts, totals, or averages, think about which records
-       should logically be included vs excluded.
+    ══════════════════════════════════════════════════════════════
+    RULE 0 — SIMPLICITY FIRST (HIGHEST PRIORITY)
+    ══════════════════════════════════════════════════════════════
+    Always use the SIMPLEST possible query that correctly answers the question.
+    - If a pre-computed total/summary column already exists in the schema
+      (e.g. total_amount, grand_total, total_price), USE IT DIRECTLY.
+      NEVER reconstruct it by summing component columns — that is always WRONG
+      because it misses labour, taxes, making charges, and other components.
+    - For single-record lookups (e.g. "total amount of PO12345"), just filter
+      and SELECT that column. No extra joins, no SUM.
+    - Only JOIN tables when the required column does not exist in the primary table.
+    - Only aggregate (SUM, COUNT, AVG) when the question genuinely asks for an
+      aggregate across multiple rows.
+
+    ══════════════════════════════════════════════════════════════
+    RULE 1 — WHICH COLUMN TO USE (CRITICAL — READ CAREFULLY)
+    ══════════════════════════════════════════════════════════════
+
+    ORDER-LEVEL QUESTIONS (revenue, AOV, total sales, order value, total amount):
+      → Use: sales_table_v2_sales_order.total_amount
+      → This is the PRE-COMPUTED grand total per order (includes all items,
+        gold, diamonds, making charges, labour, taxes).
+      → Examples: "total revenue", "AOV", "average order value", "total sales",
+        "how much did customer X spend", "total amount of order SO123".
+      → Formula:
+          Revenue   = SUM(total_amount) FROM sales_order WHERE status = 'closed'
+          AOV       = AVG(total_amount) FROM sales_order WHERE status = 'closed'
+             OR      = SUM(total_amount) / COUNT(DISTINCT so_id) WHERE status = 'closed'
+      → NEVER use line_total from sales_order_line_pricing for these — it is a
+        per-line amount and will give wrong results.
+
+    LINE-ITEM / PRODUCT-LEVEL QUESTIONS (per-product revenue, top products by sales):
+      → Use: sales_table_v2_sales_order_line_pricing.line_total
+      → Use ONLY when the question is about individual product/SKU performance.
+      → Examples: "revenue per product", "top selling products by revenue",
+        "which product generates most sales".
+      → JOIN path: sales_order → sales_order_line → sales_order_line_pricing
+      → Still filter by sales_order.status = 'closed'.
+
+    PURCHASE ORDER TOTALS:
+      → Use: purchase_orders_v6_purchase_order.total_amount
+      → For: "total amount of PO123", "PO value", "purchase order cost".
+      → NEVER sum gold_amount + diamond_amount from PO line tables — that misses labour.
+
+    ══════════════════════════════════════════════════════════════
+    RULE 2 — STATUS FILTERING
+    ══════════════════════════════════════════════════════════════
+    For ALL revenue, sales, AOV, and financial metrics:
+      → WHERE status = 'closed' on sales_table_v2_sales_order
+    For product catalog or inventory questions: no status filter needed.
+
+    ══════════════════════════════════════════════════════════════
+    RULE 3 — DATE FILTERING
+    ══════════════════════════════════════════════════════════════
+    The order_date column is stored as TEXT in 'YYYY-MM-DD' format.
+    Use text comparisons for date filters:
+      → "last year" (2024): order_date >= '2024-01-01' AND order_date <= '2024-12-31'
+      → "this year" (2025): order_date >= '2025-01-01' AND order_date <= '2025-12-31'
+      → "last month": use appropriate YYYY-MM-DD range.
 
     Steps:
-    1. Understand the user's question (intent, metrics, entities, filters)
-    2. Review the DATA PROFILE to understand actual values in the database
-    3. Identify which tables and columns are relevant
-    4. Determine appropriate filters (especially status-based) for accurate results
-    5. Produce a complete logical query plan"""
+    1. Identify: is this ORDER-LEVEL or LINE-ITEM-LEVEL or PO question?
+    2. Pick the correct source column per RULE 1 above.
+    3. Identify the MINIMUM tables needed (often just one table).
+    4. Apply status and date filters as needed.
+    5. Produce the simplest correct query plan."""
 
     question = dspy.InputField(desc="The user's natural-language question")
     schema_info = dspy.InputField(desc="Full database schema with table names, columns, and types")
@@ -44,38 +90,44 @@ class AnalyzeAndPlan(dspy.Signature):
     data_profile = dspy.InputField(desc="Data profile showing actual values: distinct categorical values, numeric ranges, date ranges")
 
     intent = dspy.OutputField(desc="What the user wants to know (1 sentence)")
-    relevant_tables = dspy.OutputField(desc="Comma-separated list of tables needed")
+    relevant_tables = dspy.OutputField(desc="Comma-separated list of tables needed (minimum necessary)")
     relevant_columns = dspy.OutputField(desc="Comma-separated list of table.column pairs needed")
     join_conditions = dspy.OutputField(desc="JOIN conditions to use, or 'none'")
-    where_conditions = dspy.OutputField(desc="WHERE conditions including status/state filters for accurate business metrics, or 'none'")
+    where_conditions = dspy.OutputField(desc="WHERE conditions including status/date filters, or 'none'")
     aggregations = dspy.OutputField(desc="Aggregation functions to apply, or 'none'")
     group_by = dspy.OutputField(desc="GROUP BY columns, or 'none'")
     order_by = dspy.OutputField(desc="ORDER BY clause, or 'none'")
     limit_val = dspy.OutputField(desc="LIMIT value, or 'none'")
 
 
-# ── 2. SQL Generation ──────────────────────────────────────────────────────
+# ── 2. SQL Generation ──────────────────────────────────────────────────────────
 
 class SQLGeneration(dspy.Signature):
     """Generate a valid PostgreSQL SELECT query based on the query plan.
     The query must be syntactically correct and only reference existing
     tables and columns from the schema.
 
-    SIMPLICITY RULES (MUST FOLLOW):
-    - If a pre-computed total/summary column exists (e.g. total_amount, grand_total,
-      total_price, net_amount), SELECT THAT COLUMN DIRECTLY. NEVER reconstruct it
-      by adding component columns (e.g. gold_amount + diamond_amount) — that will give
-      wrong answers because it ignores labour, taxes, and other components.
-    - For single-record lookups (e.g. "total amount of PO12345"), write:
-        SELECT total_amount FROM <table> WHERE po_id = 'PO12345'
-      NOT a multi-table join with SUM of parts.
-    - Only JOIN tables if the required column does not exist in the primary table.
-    - Only use aggregation (SUM, COUNT, AVG, etc.) when the question genuinely asks
-      for an aggregate across multiple rows.
+    CRITICAL RULES:
 
-    BUSINESS RULES:
-    - Include status/state filters from the query plan for accurate metrics.
-    - Ensure the query respects business logic (e.g., only closed orders for revenue).
+    1. USE PRE-COMPUTED TOTALS — NEVER RECONSTRUCT THEM:
+       - For order-level metrics (revenue, AOV): use sales_table_v2_sales_order.total_amount
+       - For PO totals: use purchase_orders_v6_purchase_order.total_amount
+       - NEVER add gold_amount + diamond_amount or any component columns —
+         that always gives the WRONG answer (misses labour, taxes, etc.)
+
+    2. CORRECT FORMULAS:
+       - Revenue:  SELECT SUM(total_amount) FROM sales_table_v2_sales_order WHERE status = 'closed'
+       - AOV:      SELECT AVG(total_amount) FROM sales_table_v2_sales_order WHERE status = 'closed'
+       - Per-product revenue: SUM(line_total) FROM sales_order_line_pricing
+                              JOIN sales_order_line JOIN sales_order WHERE status = 'closed'
+
+    3. DATE FILTERING (order_date is TEXT 'YYYY-MM-DD'):
+       - Use: order_date >= 'YYYY-01-01' AND order_date <= 'YYYY-12-31'
+       - Do NOT use EXTRACT() or CAST() on order_date
+
+    4. SIMPLICITY:
+       - Single-record lookup = simple WHERE filter, no aggregation
+       - Only JOIN when needed, only aggregate when needed
 
     CRITICAL: Output ONLY the raw SQL. No markdown, no explanation, no comments."""
 
@@ -85,12 +137,14 @@ class SQLGeneration(dspy.Signature):
 
     sql_query = dspy.OutputField(
         desc="The SIMPLEST valid PostgreSQL SELECT query that correctly answers the question. "
-             "Use pre-computed total columns when available. Avoid unnecessary joins and aggregations. "
-             "Output ONLY the raw SQL code — no markdown, no explanation, no code fences."
+             "Use pre-computed total_amount for order/PO totals. "
+             "Use AVG(total_amount) or SUM(total_amount)/COUNT(DISTINCT so_id) for AOV — "
+             "NEVER SUM or AVG of line_total for AOV. "
+             "Output ONLY raw SQL — no markdown, no explanation, no code fences."
     )
 
 
-# ── 3. SQL Self-Critique & Repair (combined) ───────────────────────────────
+# ── 3. SQL Self-Critique & Repair ─────────────────────────────────────────────
 
 class SQLCritiqueAndFix(dspy.Signature):
     """Evaluate a generated SQL query for correctness against the schema.
@@ -110,7 +164,7 @@ class SQLCritiqueAndFix(dspy.Signature):
     )
 
 
-# ── 4. Interpret & Insight (combined) ──────────────────────────────────────
+# ── 4. Interpret & Insight ────────────────────────────────────────────────────
 
 class InterpretAndInsight(dspy.Signature):
     """Interpret SQL query results for a non-technical user and generate insights.
@@ -140,7 +194,7 @@ class InterpretAndInsight(dspy.Signature):
     )
 
 
-# ── 5. SQL Repair (for execution errors) ──────────────────────────────────
+# ── 5. SQL Repair ─────────────────────────────────────────────────────────────
 
 class SQLRepair(dspy.Signature):
     """Given a SQL query that produced a database error, generate a
