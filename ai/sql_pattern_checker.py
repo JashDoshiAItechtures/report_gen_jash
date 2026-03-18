@@ -232,6 +232,31 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
                 ),
             })
 
+    # ── Pattern 3b ───────────────────────────────────────────────────────────
+    # "per order" metric computed with SUM(quantity) as denominator instead of
+    # COUNT(DISTINCT so_id).  SUM(quantity) = revenue per unit; "per order"
+    # requires COUNT(DISTINCT so_id).
+    # Heuristic: division where the denominator contains sum(...quantity...)
+    if re.search(r"/\s*sum\s*\([^)]*quantit", sql_lower):
+        issues.append({
+            "pattern_name": "per_unit_instead_of_per_order",
+            "description": (
+                "POSSIBLE BUG — dividing by SUM(quantity) gives revenue per UNIT (per piece). "
+                "If the question asks for 'per order', the denominator must be "
+                "COUNT(DISTINCT so_id), not SUM(quantity). "
+                "These are completely different metrics: "
+                "SUM(line_total)/SUM(quantity) = avg revenue per item sold; "
+                "SUM(line_total)/COUNT(DISTINCT so_id) = avg revenue each time product appears in an order."
+            ),
+            "correction": (
+                "Check the question: does it say 'per order' or 'per unit/piece'?\n"
+                "  'per order'    → SUM(lp.line_total) / COUNT(DISTINCT so.so_id)\n"
+                "  'per unit'     → SUM(lp.line_total) / SUM(lp.quantity)\n"
+                "  'per customer' → SUM(lp.line_total) / COUNT(DISTINCT so.customer_id)\n"
+                "If the question says 'per order', rewrite using COUNT(DISTINCT so.so_id)."
+            ),
+        })
+
     # ── Pattern 4 ────────────────────────────────────────────────────────────
     # Schema-aware: detect alias.column where column doesn't exist in that table.
     # Generic — works for gold_kt on pricing table, or any future similar mistake.

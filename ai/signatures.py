@@ -161,6 +161,29 @@ class AnalyzeAndPlan(dspy.Signature):
     Use product_id as the only product identifier. Never invent table names.
 
     ══════════════════════════════════════════════════════════════
+    RULE 1D2 — "PER X" DENOMINATOR — READ THE QUESTION CAREFULLY
+    ══════════════════════════════════════════════════════════════
+    The word after "per" tells you exactly what the denominator must be.
+    Using the wrong denominator gives a completely different metric.
+
+    "per order"    → COUNT(DISTINCT so_id)     ← number of sales orders
+    "per unit"     → SUM(quantity)             ← number of pieces/items sold
+    "per customer" → COUNT(DISTINCT customer_id)
+    "per product"  → COUNT(DISTINCT product_id)
+    "per vendor"   → COUNT(DISTINCT vendor_id)
+    "per SKU"      → COUNT(DISTINCT variant_sku)
+
+    WRONG — "per order" using quantity as denominator:
+      SUM(lp.line_total) / SUM(sol.quantity)       ← this is revenue per UNIT, not per ORDER
+
+    CORRECT — "per order" using distinct order count:
+      SUM(lp.line_total) / COUNT(DISTINCT so.so_id) ← this is revenue per ORDER
+
+    Similarly for AOV (average order value):
+      AVG(total_amount)  or  SUM(total_amount) / COUNT(DISTINCT so_id)
+      NEVER  SUM(total_amount) / SUM(quantity)
+
+    ══════════════════════════════════════════════════════════════
     RULE 1E — WHICH TABLE OWNS WHICH COLUMNS (DO NOT MIX)
     ══════════════════════════════════════════════════════════════
     sales_order_line_pricing  → financial rollup only:
@@ -481,6 +504,14 @@ class SQLGeneration(dspy.Signature):
         For both in same order: use INTERSECT on sales_order_line.
 
     4d. NO product_master table — never reference it; use product_id only.
+
+    4d2. "PER X" DENOMINATOR — use the correct divisor for what "per" refers to:
+         "per order"    → COUNT(DISTINCT so.so_id)      NOT SUM(quantity)
+         "per unit"     → SUM(quantity)                 NOT COUNT(DISTINCT so_id)
+         "per customer" → COUNT(DISTINCT so.customer_id)
+         "per vendor"   → COUNT(DISTINCT vendor_id)
+         WRONG:   SUM(line_total) / SUM(quantity)        ← revenue per unit, not per order
+         CORRECT: SUM(line_total) / COUNT(DISTINCT so.so_id) ← revenue per order
 
     4e. TABLE COLUMN OWNERSHIP — never use a column from the wrong table:
         sales_order_line_pricing → has: gold_amount_per_unit, diamond_amount_per_unit,
