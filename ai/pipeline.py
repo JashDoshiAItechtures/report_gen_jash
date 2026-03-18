@@ -23,6 +23,7 @@ from ai.signatures import (
     InterpretAndInsight,
 )
 from ai.validator import validate_sql, check_sql_against_schema
+from ai.sql_pattern_checker import check_sql_patterns, format_issues_for_repair
 from db.schema import format_schema
 from db.relationships import format_relationships
 from db.profiler import get_data_profile
@@ -111,6 +112,21 @@ class SQLAnalystPipeline:
                 question=question_with_date,
                 schema_info=schema_str,
                 query_plan=plan_text + f"\n\nPREVIOUS SQL HAD ISSUES: {schema_issues}. Fix them.",
+            )
+            sql = self._clean_sql(sql_result.sql_query)
+
+        # 3.5 Pattern check — detect known structural bad patterns, force targeted repair
+        pattern_issues = check_sql_patterns(sql)
+        if pattern_issues:
+            logger.warning(
+                "Pattern issues detected: %s",
+                [i["pattern_name"] for i in pattern_issues],
+            )
+            repair_instruction = format_issues_for_repair(pattern_issues)
+            sql_result = self.generate_sql(
+                question=question_with_date,
+                schema_info=schema_str,
+                query_plan=plan_text + "\n\n" + repair_instruction,
             )
             sql = self._clean_sql(sql_result.sql_query)
 

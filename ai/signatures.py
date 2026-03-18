@@ -88,6 +88,79 @@ class AnalyzeAndPlan(dspy.Signature):
       → NEVER sum gold_amount + diamond_amount from PO line tables — that misses labour.
 
     ══════════════════════════════════════════════════════════════
+    RULE 1A — FAN-OUT: purchase_order + po_sales_order_link
+    ══════════════════════════════════════════════════════════════
+    po_sales_order_link has MULTIPLE rows per po_id (one per linked SO).
+    Joining purchase_order → po_sales_order_link and doing SUM(total_amount)
+    counts each PO's amount once per linked SO — completely wrong.
+
+    WRONG (never write this):
+      SELECT po.vendor_id, SUM(po.total_amount)
+      FROM purchase_orders_v6_purchase_order po
+      JOIN purchase_orders_v6_po_sales_order_link pl ON po.po_id = pl.po_id
+      JOIN sales_table_v2_sales_order so ON pl.so_id = so.so_id
+      WHERE so.status = 'closed'
+      GROUP BY po.vendor_id
+
+    CORRECT (DISTINCT subquery first, then SUM):
+      SELECT vendor_id, SUM(total_amount) AS total_value
+      FROM (
+          SELECT DISTINCT po.po_id, po.vendor_id, po.total_amount
+          FROM purchase_orders_v6_purchase_order po
+          JOIN purchase_orders_v6_po_sales_order_link pl ON po.po_id = pl.po_id
+          JOIN sales_table_v2_sales_order so ON pl.so_id = so.so_id
+          WHERE so.status = 'closed'
+      ) deduped
+      GROUP BY vendor_id
+      ORDER BY total_value DESC
+
+    ══════════════════════════════════════════════════════════════
+    RULE 1B — LAG/LEAD must ORDER BY YEAR then MONTH
+    ══════════════════════════════════════════════════════════════
+    Data spans multiple years (2024–2026). ORDER BY month alone inside a window
+    function compares months across different years — wrong growth rates.
+
+    WRONG: LAG(revenue) OVER (ORDER BY EXTRACT(MONTH FROM order_date::date))
+    CORRECT: LAG(revenue) OVER (ORDER BY yr ASC, mo ASC)
+
+    Also: do NOT add WHERE status = 'closed' unless the question asks for it.
+    For growth/trend questions, use all orders (no status filter).
+
+    CORRECT MoM template:
+      WITH monthly AS (
+          SELECT EXTRACT(YEAR  FROM order_date::date) AS yr,
+                 EXTRACT(MONTH FROM order_date::date) AS mo,
+                 SUM(total_amount) AS revenue
+          FROM sales_table_v2_sales_order
+          GROUP BY yr, mo
+      )
+      SELECT yr, mo, revenue,
+             LAG(revenue) OVER (ORDER BY yr ASC, mo ASC) AS prev_revenue
+      FROM monthly ORDER BY yr, mo
+
+    ══════════════════════════════════════════════════════════════
+    RULE 1C — IGI/NC certification is in variant_sku, NOT quality
+    ══════════════════════════════════════════════════════════════
+    The quality column in diamond tables holds grades like 'GH VVS' — never 'IGI'/'NC'.
+    Filtering quality = 'IGI' always returns zero rows.
+
+    WRONG: WHERE T3.quality IN ('IGI', 'Non-IGI')
+    CORRECT: WHERE variant_sku LIKE '%-IGI'   (or '%-NC' for non-certified)
+
+    For "customers with both IGI and NC in same order":
+      WHERE so.so_id IN (
+          SELECT so_id FROM sales_table_v2_sales_order_line WHERE variant_sku LIKE '%-IGI'
+          INTERSECT
+          SELECT so_id FROM sales_table_v2_sales_order_line WHERE variant_sku LIKE '%-NC'
+      )
+
+    ══════════════════════════════════════════════════════════════
+    RULE 1D — NO product_master TABLE EXISTS
+    ══════════════════════════════════════════════════════════════
+    There is no product_master, products, or product_catalog table.
+    Use product_id as the only product identifier. Never invent table names.
+
+    ══════════════════════════════════════════════════════════════
     RULE 1A — FAN-OUT: DEDUPLICATE BEFORE AGGREGATING ON JOIN CHAINS
     ══════════════════════════════════════════════════════════════
     purchase_orders_v6_po_sales_order_link has MULTIPLE rows per po_id.
@@ -338,6 +411,30 @@ class SQLGeneration(dspy.Signature):
     4e. REVENUE SOURCE — never mix:
         Order-level: sales_table_v2_sales_order.total_amount
         Line-level:  sales_table_v2_sales_order_line_pricing.line_total
+
+    4. FAN-OUT — when joining purchase_order to po_sales_order_link, use DISTINCT subquery:
+       WRONG:   SELECT po.vendor_id, SUM(po.total_amount) FROM purchase_order po
+                JOIN po_sales_order_link pl ON po.po_id = pl.po_id ... GROUP BY po.vendor_id
+       CORRECT: SELECT vendor_id, SUM(total_amount) FROM (
+                    SELECT DISTINCT po.po_id, po.vendor_id, po.total_amount
+                    FROM purchase_orders_v6_purchase_order po
+                    JOIN purchase_orders_v6_po_sales_order_link pl ON po.po_id = pl.po_id
+                    JOIN sales_table_v2_sales_order so ON pl.so_id = so.so_id
+                    WHERE so.status = 'closed'
+                ) deduped GROUP BY vendor_id
+
+    4b. LAG/LEAD window functions — always ORDER BY yr ASC, mo ASC (never month only):
+        Also: do NOT add status = 'closed' for trend/growth queries unless explicitly asked.
+        WRONG:   LAG(x) OVER (ORDER BY EXTRACT(MONTH FROM ...))
+        CORRECT: LAG(x) OVER (ORDER BY EXTRACT(YEAR FROM order_date::date) ASC,
+                                        EXTRACT(MONTH FROM order_date::date) ASC)
+
+    4c. IGI/NC certification — from variant_sku LIKE '%-IGI' / '%-NC', NOT from quality column:
+        WRONG:   WHERE quality IN ('IGI', 'Non-IGI')
+        CORRECT: WHERE variant_sku LIKE '%-IGI'
+        For both in same order: use INTERSECT on sales_order_line.
+
+    4d. NO product_master table — never reference it; use product_id only.
 
     5. USE PRE-COMPUTED TOTALS — NEVER RECONSTRUCT THEM:
        - For order-level metrics (revenue, AOV): use sales_table_v2_sales_order.total_amount
