@@ -232,6 +232,43 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
                 ),
             })
 
+    # ── Pattern 3a ───────────────────────────────────────────────────────────
+    # WHERE status filter alongside CASE WHEN status — wrong denominator.
+    # When computing "percentage of X vs Y", the WHERE clause must NOT pre-filter
+    # by status because that shrinks the denominator (misses open/processing orders).
+    # CASE WHEN inside SUM() handles the split; no WHERE on status needed.
+    if (
+        re.search(r"\bcase\s+when\b.*?\bstatus\b", sql_lower, re.DOTALL)
+        and re.search(r"\bwhere\b.*?\bstatus\s+in\s*\(", sql_lower, re.DOTALL)
+        and re.search(r"\bsum\s*\(", sql_lower)
+    ):
+        issues.append({
+            "pattern_name": "case_when_status_with_where_filter",
+            "description": (
+                "WRONG DENOMINATOR — a WHERE status IN (...) filter is combined with "
+                "CASE WHEN so.status = ... inside SUM(). "
+                "The WHERE clause removes rows before aggregation, making the denominator "
+                "(SUM of all orders) too small and inflating every percentage. "
+                "For percentage breakdowns across statuses, the CASE WHEN handles the split "
+                "and the WHERE clause on status must be removed."
+            ),
+            "correction": (
+                "Remove the WHERE status filter. Let CASE WHEN handle the split:\n"
+                "\n"
+                "CORRECT pattern:\n"
+                "SELECT cm.customer_id, cm.customer_name,\n"
+                "    ROUND((SUM(CASE WHEN so.status = 'closed' THEN so.total_amount ELSE 0 END)\n"
+                "           * 100.0 / SUM(so.total_amount))::numeric, 2) AS pct_closed,\n"
+                "    ROUND((SUM(CASE WHEN so.status = 'cancelled' THEN so.total_amount ELSE 0 END)\n"
+                "           * 100.0 / SUM(so.total_amount))::numeric, 2) AS pct_cancelled\n"
+                "FROM sales_table_v2_sales_order so\n"
+                "JOIN sales_table_v2_customer_master cm ON so.customer_id = cm.customer_id\n"
+                "GROUP BY cm.customer_id, cm.customer_name\n"
+                "\n"
+                "No WHERE on status — SUM(so.total_amount) must include ALL orders as denominator."
+            ),
+        })
+
     # ── Pattern 3b ───────────────────────────────────────────────────────────
     # "per order" metric computed with SUM(quantity) as denominator instead of
     # COUNT(DISTINCT so_id).  SUM(quantity) = revenue per unit; "per order"
@@ -256,6 +293,34 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
                 "If the question says 'per order', rewrite using COUNT(DISTINCT so.so_id)."
             ),
         })
+
+    # ── Pattern 3c ───────────────────────────────────────────────────────────
+    # PostgreSQL ROUND() requires numeric, not double precision.
+    # ROUND(expr, N) fails with "function round(double precision, integer) does not exist"
+    # if expr evaluates to double precision. Fix: cast to ::numeric before ROUND().
+    if re.search(r"\bround\s*\(", sql_lower):
+        # Check if any ROUND( call lacks a ::numeric cast inside it
+        round_calls = re.findall(r"round\s*\(([^;]+?),\s*\d+\s*\)", sql, re.IGNORECASE)
+        for call in round_calls:
+            if "::numeric" not in call.lower() and "::decimal" not in call.lower():
+                issues.append({
+                    "pattern_name": "round_missing_numeric_cast",
+                    "description": (
+                        "PostgreSQL TYPE ERROR — ROUND(value, N) only accepts numeric as first "
+                        "argument. If value is double precision (e.g. result of division or "
+                        "SUM()), PostgreSQL raises: "
+                        "'function round(double precision, integer) does not exist'. "
+                        "You must cast to ::numeric before calling ROUND."
+                    ),
+                    "correction": (
+                        "Always cast the expression to ::numeric inside ROUND:\n"
+                        "  WRONG:   ROUND(SUM(x) * 100.0 / SUM(y), 2)\n"
+                        "  CORRECT: ROUND((SUM(x) * 100.0 / SUM(y))::numeric, 2)\n"
+                        "\n"
+                        "Apply this to every ROUND(..., N) call in the query."
+                    ),
+                })
+                break  # one report per query is enough
 
     # ── Pattern 4 ────────────────────────────────────────────────────────────
     # Schema-aware: detect alias.column where column doesn't exist in that table.

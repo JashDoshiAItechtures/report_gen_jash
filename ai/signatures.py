@@ -161,6 +161,44 @@ class AnalyzeAndPlan(dspy.Signature):
     Use product_id as the only product identifier. Never invent table names.
 
     ══════════════════════════════════════════════════════════════
+    RULE 1D0 — PERCENTAGE / RATIO WITH CASE WHEN — NEVER PRE-FILTER STATUS
+    ══════════════════════════════════════════════════════════════
+    When computing a percentage breakdown across different statuses
+    (e.g. "% closed vs % cancelled"), the denominator must be ALL orders.
+    Adding WHERE status IN ('closed', 'cancelled') before grouping removes
+    other statuses from the denominator → inflated percentages.
+
+    WRONG (WHERE filter shrinks denominator):
+      SELECT customer_id,
+          SUM(CASE WHEN status = 'closed' THEN total_amount ELSE 0 END) * 100.0
+          / SUM(total_amount) AS pct_closed
+      FROM sales_table_v2_sales_order
+      WHERE status IN ('closed', 'cancelled')   ← removes open/processing rows
+      GROUP BY customer_id
+
+    CORRECT (no WHERE on status — CASE WHEN handles the split):
+      SELECT cm.customer_id, cm.customer_name,
+          ROUND((SUM(CASE WHEN so.status = 'closed' THEN so.total_amount ELSE 0 END)
+                 * 100.0 / SUM(so.total_amount))::numeric, 2) AS pct_closed,
+          ROUND((SUM(CASE WHEN so.status = 'cancelled' THEN so.total_amount ELSE 0 END)
+                 * 100.0 / SUM(so.total_amount))::numeric, 2) AS pct_cancelled
+      FROM sales_table_v2_sales_order so
+      JOIN sales_table_v2_customer_master cm ON so.customer_id = cm.customer_id
+      GROUP BY cm.customer_id, cm.customer_name
+
+    ══════════════════════════════════════════════════════════════
+    RULE 1D1 — PostgreSQL ROUND() REQUIRES ::numeric CAST
+    ══════════════════════════════════════════════════════════════
+    PostgreSQL's ROUND(value, N) only accepts numeric as the first argument.
+    Division or SUM() results are often double precision — passing them to
+    ROUND() directly raises: "function round(double precision, integer) does not exist".
+
+    WRONG:   ROUND(SUM(x) * 100.0 / SUM(y), 2)
+    CORRECT: ROUND((SUM(x) * 100.0 / SUM(y))::numeric, 2)
+
+    Always cast the expression to ::numeric inside every ROUND(..., N) call.
+
+    ══════════════════════════════════════════════════════════════
     RULE 1D2 — "PER X" DENOMINATOR — READ THE QUESTION CAREFULLY
     ══════════════════════════════════════════════════════════════
     The word after "per" tells you exactly what the denominator must be.
@@ -504,6 +542,16 @@ class SQLGeneration(dspy.Signature):
         For both in same order: use INTERSECT on sales_order_line.
 
     4d. NO product_master table — never reference it; use product_id only.
+
+    4d0. PERCENTAGE WITH CASE WHEN — never add WHERE status filter on the same column:
+         When splitting by status with CASE WHEN, the denominator must include ALL rows.
+         WRONG:   WHERE status IN ('closed','cancelled') ... SUM(total_amount) as denominator
+         CORRECT: No WHERE on status. CASE WHEN handles split; SUM(total_amount) = all orders.
+
+    4d1. ROUND() IN PostgreSQL — always cast to ::numeric first:
+         WRONG:   ROUND(SUM(x) / SUM(y), 2)
+         CORRECT: ROUND((SUM(x) / SUM(y))::numeric, 2)
+         Applies to every ROUND(..., N) call — division results are double precision by default.
 
     4d2. "PER X" DENOMINATOR — use the correct divisor for what "per" refers to:
          "per order"    → COUNT(DISTINCT so.so_id)      NOT SUM(quantity)
