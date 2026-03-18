@@ -161,6 +161,43 @@ class AnalyzeAndPlan(dspy.Signature):
     Use product_id as the only product identifier. Never invent table names.
 
     ══════════════════════════════════════════════════════════════
+    RULE 1E — WHICH TABLE OWNS WHICH COLUMNS (DO NOT MIX)
+    ══════════════════════════════════════════════════════════════
+    sales_order_line_pricing  → financial rollup only:
+        gold_amount_per_unit, diamond_amount_per_unit, making_charges_per_unit,
+        base_price_per_unit, selling_price_per_unit, line_total, final_amount,
+        quantity, sol_id, variant_sku, product_id
+        ✗ Does NOT have: gold_kt, gold_colour, gold_rate_per_gm, metal_weight,
+                          diamond_id, shape, quality, pointer, carats
+
+    sales_order_line_gold     → physical gold attributes:
+        gold_kt, gold_colour, gold_rate_per_gm, metal_weight_per_unit,
+        finding_per_unit, gross_weight_per_unit, gold_amount_per_unit, sol_id
+        → JOIN to pricing on sol_id when you need both gold attributes AND costs.
+
+    sales_order_line_diamond  → physical diamond attributes:
+        diamond_id, shape, quality, size_mm, pointer, pieces_per_unit,
+        carats_per_unit, rate_per_carat, diamond_amount_per_unit, sol_id
+        → JOIN to pricing on sol_id ONLY when the question asks about diamond
+          properties (shape, quality, karat, carat) — NOT for cost aggregation.
+
+    RULE: If the question asks "by karat" / "by gold_kt" / "by colour" etc.,
+    you MUST join sales_order_line_gold. You cannot get gold_kt from pricing.
+
+    Example — total costs by karat type:
+      SELECT g.gold_kt,
+             SUM(lp.gold_amount_per_unit    * lp.quantity) AS total_gold_amount,
+             SUM(lp.diamond_amount_per_unit * lp.quantity) AS total_diamond_amount,
+             SUM(lp.making_charges_per_unit * lp.quantity) AS total_making_charges
+      FROM sales_table_v2_sales_order_line_pricing lp
+      JOIN sales_table_v2_sales_order_line_gold g  ON lp.sol_id = g.sol_id
+      JOIN sales_table_v2_sales_order_line     sol ON lp.sol_id = sol.sol_id
+      JOIN sales_table_v2_sales_order          so  ON sol.so_id = so.so_id
+      WHERE so.status = 'closed'
+      GROUP BY g.gold_kt
+      ORDER BY g.gold_kt
+
+    ══════════════════════════════════════════════════════════════
     RULE 1A — FAN-OUT: DEDUPLICATE BEFORE AGGREGATING ON JOIN CHAINS
     ══════════════════════════════════════════════════════════════
     purchase_orders_v6_po_sales_order_link has MULTIPLE rows per po_id.
@@ -435,6 +472,17 @@ class SQLGeneration(dspy.Signature):
         For both in same order: use INTERSECT on sales_order_line.
 
     4d. NO product_master table — never reference it; use product_id only.
+
+    4e. TABLE COLUMN OWNERSHIP — never use a column from the wrong table:
+        sales_order_line_pricing → has: gold_amount_per_unit, diamond_amount_per_unit,
+          making_charges_per_unit, line_total, quantity, sol_id, variant_sku, product_id
+          ✗ does NOT have: gold_kt, gold_colour, shape, quality, diamond_id
+        sales_order_line_gold → has: gold_kt, gold_colour, gold_rate_per_gm,
+          metal_weight_per_unit (JOIN on sol_id when grouping/filtering by karat or colour)
+        sales_order_line_diamond → has: shape, quality, diamond_id, carats_per_unit
+          (JOIN on sol_id only for property filters, never for cost aggregation)
+        WRONG:  SELECT lp.gold_kt ... FROM sales_order_line_pricing lp
+        CORRECT: JOIN sales_order_line_gold g ON lp.sol_id = g.sol_id, then use g.gold_kt
 
     5. USE PRE-COMPUTED TOTALS — NEVER RECONSTRUCT THEM:
        - For order-level metrics (revenue, AOV): use sales_table_v2_sales_order.total_amount

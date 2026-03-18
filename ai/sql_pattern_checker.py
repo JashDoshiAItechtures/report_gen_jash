@@ -9,6 +9,96 @@ import re
 from typing import Any
 
 
+def _build_alias_map(sql: str) -> dict[str, str]:
+    """Extract alias → full_table_name mapping from FROM / JOIN clauses.
+
+    Handles:  FROM table_name alias
+              FROM table_name AS alias
+              JOIN table_name alias
+              JOIN table_name AS alias
+    Returns lower-cased keys and values.
+    """
+    alias_map: dict[str, str] = {}
+    pattern = re.compile(
+        r'(?:FROM|JOIN)\s+"?(\w+)"?\s+(?:AS\s+)?"?(\w+)"?',
+        re.IGNORECASE,
+    )
+    for table, alias in pattern.findall(sql):
+        alias_map[alias.lower()] = table.lower()
+        # also map table → table in case no alias is used
+        alias_map[table.lower()] = table.lower()
+    return alias_map
+
+
+def check_column_table_mismatches(sql: str) -> list[dict[str, Any]]:
+    """Schema-aware check: detect alias.column references where the column
+    does not exist in the aliased table.
+
+    Uses the live database schema so it works for ANY table/column — nothing
+    is hardcoded.  Returns issue dicts in the same format as check_sql_patterns.
+    """
+    try:
+        from db.schema import get_schema
+        schema = get_schema()
+    except Exception:
+        return []   # schema unavailable, skip check
+
+    # Build {table_name_lower: {col_lower, ...}}
+    table_cols: dict[str, set[str]] = {
+        t.lower(): {c["column_name"].lower() for c in cols}
+        for t, cols in schema.items()
+    }
+
+    alias_map = _build_alias_map(sql)
+    issues: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    # Find all alias.column references in the SQL
+    for alias, col in re.findall(r'\b(\w+)\.(\w+)\b', sql):
+        alias_l = alias.lower()
+        col_l   = col.lower()
+        key = f"{alias_l}.{col_l}"
+        if key in seen:
+            continue
+        seen.add(key)
+
+        table_l = alias_map.get(alias_l)
+        if table_l is None:
+            continue  # unknown alias (subquery alias, CTE name, etc.) — skip
+        if table_l not in table_cols:
+            continue  # table not in schema — already caught by schema validator
+
+        if col_l not in table_cols[table_l]:
+            # Find which tables DO have this column
+            tables_with_col = [
+                t for t, cols in table_cols.items() if col_l in cols
+            ]
+            # Build a helpful correction hint
+            if tables_with_col:
+                hint = (
+                    f"Column '{col}' does NOT exist in '{table_l}'. "
+                    f"It is available in: {', '.join(tables_with_col)}. "
+                    f"JOIN the correct table on sol_id / so_id / po_id as appropriate "
+                    f"and reference that table's alias instead."
+                )
+            else:
+                hint = (
+                    f"Column '{col}' does NOT exist in '{table_l}' "
+                    f"or any other table in the schema. "
+                    f"Remove it or use a column that actually exists."
+                )
+            issues.append({
+                "pattern_name": f"wrong_table_for_{col_l}",
+                "description": (
+                    f"CRITICAL BUG — column '{col}' referenced via alias '{alias}' "
+                    f"which maps to table '{table_l}', but that column does not exist there."
+                ),
+                "correction": hint,
+            })
+
+    return issues
+
+
 def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
     """Detect known bad patterns in a generated SQL string.
 
@@ -141,6 +231,11 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
                     ")"
                 ),
             })
+
+    # ── Pattern 4 ────────────────────────────────────────────────────────────
+    # Schema-aware: detect alias.column where column doesn't exist in that table.
+    # Generic — works for gold_kt on pricing table, or any future similar mistake.
+    issues.extend(check_column_table_mismatches(sql))
 
     return issues
 
