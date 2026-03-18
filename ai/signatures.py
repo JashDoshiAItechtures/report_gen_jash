@@ -161,6 +161,36 @@ class AnalyzeAndPlan(dspy.Signature):
     Use product_id as the only product identifier. Never invent table names.
 
     ══════════════════════════════════════════════════════════════
+    RULE 1B2 — SELECT DISTINCT WHEN JOINING HEADER TO LINE TABLES
+    ══════════════════════════════════════════════════════════════
+    When selecting a header-level ID (so_id, po_id, customer_id) after
+    joining to line-level tables (sales_order_line, sales_order_line_pricing,
+    etc.), one header row can match MANY line rows.
+    Without DISTINCT, the same header ID appears once per matching line → duplicates.
+
+    WRONG (11,111 rows with duplicate so_ids):
+      SELECT so.so_id
+      FROM sales_table_v2_sales_order so
+      JOIN sales_table_v2_sales_order_line sol ON so.so_id = sol.so_id
+      JOIN sales_table_v2_sales_order_line_pricing lp ON sol.sol_id = lp.sol_id
+      WHERE lp.making_charges_per_unit > lp.diamond_amount_per_unit
+
+    CORRECT (8,079 unique orders):
+      SELECT DISTINCT so.so_id
+      FROM sales_table_v2_sales_order so
+      JOIN sales_table_v2_sales_order_line sol ON so.so_id = sol.so_id
+      JOIN sales_table_v2_sales_order_line_pricing lp ON sol.sol_id = lp.sol_id
+      WHERE lp.making_charges_per_unit > lp.diamond_amount_per_unit
+
+    Rule: if the SELECT list contains only header-level IDs/names (no aggregation,
+    no line-level columns) AND the query joins to line tables → always add DISTINCT.
+
+    ALSO: when comparing per-unit values against each other, do NOT multiply both
+    sides by quantity — it cancels out and adds noise.
+      REDUNDANT:  making_charges_per_unit * quantity > diamond_amount_per_unit * quantity
+      SIMPLIFIED: making_charges_per_unit > diamond_amount_per_unit
+
+    ══════════════════════════════════════════════════════════════
     RULE 1C0 — "TOP/BEST PER GROUP" REQUIRES ROW_NUMBER PARTITION BY
     ══════════════════════════════════════════════════════════════
     Questions like "top customer per city", "best product per category",
@@ -622,6 +652,14 @@ class SQLGeneration(dspy.Signature):
         For both in same order: use INTERSECT on sales_order_line.
 
     4d. NO product_master table — never reference it; use product_id only.
+
+    4b2. SELECT header ID after joining line tables → always use SELECT DISTINCT:
+         Joining sales_order → sales_order_line → pricing produces one row per line item.
+         Without DISTINCT, same so_id appears N times (once per matching line) → duplicates.
+         WRONG:   SELECT so.so_id FROM sales_order so JOIN sales_order_line sol ...
+         CORRECT: SELECT DISTINCT so.so_id FROM sales_order so JOIN sales_order_line sol ...
+         Also: comparing per-unit values against each other — never multiply both sides by
+         quantity (it cancels). Use: making_charges_per_unit > diamond_amount_per_unit
 
     4c0. "TOP/BEST PER GROUP" → use ROW_NUMBER() PARTITION BY the group column, filter rnk = 1.
          WRONG: GROUP BY city, customer ORDER BY revenue DESC (global sort, not per-city top)

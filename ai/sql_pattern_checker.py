@@ -232,6 +232,59 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
                 ),
             })
 
+    # ── Pattern 1a ───────────────────────────────────────────────────────────
+    # Missing DISTINCT when selecting a header ID after joining to line tables.
+    # One header (so_id / po_id) matches many line rows → same ID repeated per line.
+    # Detectable: SELECT has a header ID, JOINs include line tables, no DISTINCT,
+    # no aggregation (COUNT/SUM/AVG/etc.) in the SELECT list.
+    SALES_LINE_TABLES_SET = {
+        "sales_table_v2_sales_order_line",
+        "sales_table_v2_sales_order_line_pricing",
+        "sales_table_v2_sales_order_line_gold",
+        "sales_table_v2_sales_order_line_diamond",
+        "purchase_orders_v6_po_line_items",
+        "purchase_orders_v6_po_line_pricing",
+        "purchase_orders_v6_po_line_diamond",
+        "purchase_orders_v6_po_line_gold",
+    }
+    HEADER_IDS = {"so_id", "po_id", "sol_id", "pol_id"}
+
+    tables_referenced = {t.lower() for t in re.findall(r'\b(\w+)\b', sql_lower)}
+    joins_line_table = bool(SALES_LINE_TABLES_SET & tables_referenced)
+
+    if joins_line_table:
+        # Extract SELECT list (between SELECT and FROM)
+        select_match = re.search(r'\bselect\b(.*?)\bfrom\b', sql_lower, re.DOTALL)
+        if select_match:
+            select_list = select_match.group(1).strip()
+            has_distinct = select_list.startswith("distinct")
+            has_aggregation = bool(re.search(r'\b(sum|count|avg|min|max)\s*\(', select_list))
+            # Check if only header IDs (and maybe names) are selected
+            selected_cols = {c.strip().split('.')[-1].split(' ')[0]
+                             for c in select_list.split(',')}
+            selects_only_header_id = bool(HEADER_IDS & selected_cols) and not has_aggregation
+
+            if selects_only_header_id and not has_distinct:
+                issues.append({
+                    "pattern_name": "missing_distinct_header_id_with_line_join",
+                    "description": (
+                        "DUPLICATE ROWS — selecting a header ID (so_id/po_id) after joining "
+                        "to line-level tables without DISTINCT. One order can have many line "
+                        "items; without DISTINCT the same so_id appears once per matching "
+                        "line, inflating row count (e.g. 11,111 rows instead of 8,079 orders)."
+                    ),
+                    "correction": (
+                        "Add DISTINCT immediately after SELECT:\n"
+                        "  WRONG:   SELECT so.so_id FROM ... JOIN sales_order_line ...\n"
+                        "  CORRECT: SELECT DISTINCT so.so_id FROM ... JOIN sales_order_line ...\n"
+                        "\n"
+                        "Also: when comparing per-unit columns against each other in WHERE, "
+                        "do not multiply both sides by quantity — it cancels out:\n"
+                        "  REDUNDANT:  making_charges_per_unit * quantity > diamond_amount_per_unit * quantity\n"
+                        "  SIMPLIFIED: making_charges_per_unit > diamond_amount_per_unit"
+                    ),
+                })
+
     # ── Pattern 1b ───────────────────────────────────────────────────────────
     # "Top X per group" answered as a global sort instead of PARTITION BY ranking.
     #
