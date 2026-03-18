@@ -88,6 +88,59 @@ class AnalyzeAndPlan(dspy.Signature):
       → NEVER sum gold_amount + diamond_amount from PO line tables — that misses labour.
 
     ══════════════════════════════════════════════════════════════
+    RULE 1A — FAN-OUT: DEDUPLICATE BEFORE AGGREGATING ON JOIN CHAINS
+    ══════════════════════════════════════════════════════════════
+    purchase_orders_v6_po_sales_order_link has MULTIPLE rows per po_id.
+    Joining purchase_order → po_sales_order_link and then doing SUM(total_amount)
+    counts the same PO amount once per linked sales order — WRONG.
+
+    WRONG:
+      SELECT po.vendor_id, SUM(po.total_amount)
+      FROM purchase_orders_v6_purchase_order po
+      JOIN purchase_orders_v6_po_sales_order_link lnk ON po.po_id = lnk.po_id
+      GROUP BY po.vendor_id
+
+    CORRECT — wrap purchase_order in a DISTINCT subquery first:
+      SELECT vendor_id, SUM(total_amount)
+      FROM (
+          SELECT DISTINCT po.po_id, po.vendor_id, po.total_amount
+          FROM purchase_orders_v6_purchase_order po
+          JOIN purchase_orders_v6_po_sales_order_link lnk ON po.po_id = lnk.po_id
+      ) deduped
+      GROUP BY vendor_id
+
+    Apply the DISTINCT-subquery fix whenever po_sales_order_link is in the JOIN chain
+    and you are aggregating any column from purchase_orders_v6_purchase_order.
+
+    ══════════════════════════════════════════════════════════════
+    RULE 1B — ROW MULTIPLICATION FROM DETAIL TABLE JOINS
+    ══════════════════════════════════════════════════════════════
+    sales_table_v2_sales_order_line_diamond and purchase_orders_v6_po_line_diamond
+    have MULTIPLE rows per line item (one per diamond type/shape/quality).
+    Joining them directly to pricing or header tables inflates every SUM.
+    For cost calculations: use sales_order_line_pricing which already has
+    rolled-up amounts (diamond_amount_per_unit, gold_amount_per_unit).
+    Only use detail tables when the question asks about diamond/gold PROPERTIES
+    (shape, quality, karat, carat weight) — never for cost or revenue totals.
+
+    ══════════════════════════════════════════════════════════════
+    RULE 1C — IGI/NC CERTIFICATION IS IN variant_sku, NOT quality
+    ══════════════════════════════════════════════════════════════
+    The quality column in diamond tables contains diamond grades (e.g. 'GH VVS').
+    IGI and NC are NOT values in that column.
+    Certification is the LAST segment of variant_sku:
+      105186-10K-Q12-IGI  → IGI certified  → variant_sku LIKE '%-IGI'
+      105186-10K-Q12-NC   → non-certified  → variant_sku LIKE '%-NC'
+    Apply this filter on sales_order_line or sales_order_line_pricing.
+
+    ══════════════════════════════════════════════════════════════
+    RULE 1D — NO product_master TABLE EXISTS
+    ══════════════════════════════════════════════════════════════
+    There is no product_master, products, or product_catalog table in this schema.
+    Product names do not exist — use product_id as the only product identifier.
+    Never reference a table that is not in the provided schema.
+
+    ══════════════════════════════════════════════════════════════
     RULE 2 — STATUS FILTERING (DEFAULT = 'closed', ALWAYS)
     ══════════════════════════════════════════════════════════════
     For ANY query that touches sales_table_v2_sales_order, the DEFAULT
@@ -260,6 +313,31 @@ class SQLGeneration(dspy.Signature):
              SELECT lp.variant_sku, SUM(lp.gold_amount_per_unit * lp.quantity) AS gold_cost
              FROM sales_table_v2_sales_order_line_pricing lp
              GROUP BY lp.variant_sku ORDER BY gold_cost DESC LIMIT 10
+
+    4. FAN-OUT — DISTINCT subquery when joining purchase_order to po_sales_order_link:
+       po_sales_order_link has multiple rows per po_id → SUM(total_amount) double-counts.
+       WRONG:  SELECT po.vendor_id, SUM(po.total_amount) FROM purchase_order po
+               JOIN po_sales_order_link lnk ON po.po_id = lnk.po_id GROUP BY po.vendor_id
+       CORRECT: SELECT vendor_id, SUM(total_amount) FROM (
+                    SELECT DISTINCT po.po_id, po.vendor_id, po.total_amount
+                    FROM purchase_orders_v6_purchase_order po
+                    JOIN purchase_orders_v6_po_sales_order_link lnk ON po.po_id = lnk.po_id
+                ) deduped GROUP BY vendor_id
+
+    4b. ROW MULTIPLICATION — never join sales_order_line_diamond or po_line_diamond
+        directly to pricing/header tables for cost calculations; they have multiple rows
+        per line item. Use sales_order_line_pricing rolled-up amounts instead.
+
+    4c. CERTIFICATION (IGI/NC) — comes from variant_sku last segment, NOT quality column:
+        IGI → variant_sku LIKE '%-IGI'    NC → variant_sku LIKE '%-NC'
+        Apply on sales_order_line or sales_order_line_pricing.
+
+    4d. NO product_master TABLE — never reference it; it does not exist in this schema.
+        Use product_id only. Never invent tables not present in schema_info.
+
+    4e. REVENUE SOURCE — never mix:
+        Order-level: sales_table_v2_sales_order.total_amount
+        Line-level:  sales_table_v2_sales_order_line_pricing.line_total
 
     5. USE PRE-COMPUTED TOTALS — NEVER RECONSTRUCT THEM:
        - For order-level metrics (revenue, AOV): use sales_table_v2_sales_order.total_amount
