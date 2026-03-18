@@ -232,6 +232,80 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
                 ),
             })
 
+    # ── Pattern 2a ───────────────────────────────────────────────────────────
+    # Cumulative/running window applied directly to raw table rows without
+    # pre-aggregating by date.  SUM(...) OVER (ORDER BY date) on a raw scan
+    # produces one row per ORDER, not one per date.
+    # Detectable: OVER (ORDER BY ...) present + no subquery/CTE with GROUP BY.
+    if re.search(r"\bover\s*\(.*?order\s+by\b", sql_lower, re.DOTALL):
+        has_window = bool(re.search(r"\bsum\s*\([^)]+\)\s+over\s*\(", sql_lower))
+        # Count how many times SELECT appears — more than one means a subquery exists
+        select_count = len(re.findall(r"\bselect\b", sql_lower))
+        # GROUP BY anywhere in the SQL (covers both CTE and inline subquery patterns)
+        has_any_group_by = bool(re.search(r"\bgroup\s+by\b", sql_lower))
+        # If there's a subquery (multiple SELECTs) with GROUP BY, treat it as pre-aggregated
+        has_pre_aggregation = has_any_group_by and select_count > 1
+        if has_window and not has_pre_aggregation:
+            issues.append({
+                "pattern_name": "cumulative_window_without_pre_aggregation",
+                "description": (
+                    "WRONG RESULT — SUM(...) OVER (ORDER BY date) applied directly to raw rows. "
+                    "With multiple orders per date, the window produces one cumulative value "
+                    "per ORDER ROW, not per date — same date appears multiple times with "
+                    "different cumulative totals. The correct approach is to GROUP BY date "
+                    "first in a subquery, then apply the cumulative window on top."
+                ),
+                "correction": (
+                    "Aggregate by date first, then apply the window:\n"
+                    "\n"
+                    "CORRECT:\n"
+                    "SELECT order_date, daily_revenue,\n"
+                    "       SUM(daily_revenue) OVER (ORDER BY order_date) AS cumulative_revenue\n"
+                    "FROM (\n"
+                    "    SELECT order_date::date AS order_date,\n"
+                    "           SUM(total_amount) AS daily_revenue\n"
+                    "    FROM sales_table_v2_sales_order\n"
+                    "    WHERE status = 'closed'\n"
+                    "    GROUP BY order_date::date\n"
+                    ") t\n"
+                    "ORDER BY order_date"
+                ),
+            })
+
+    # ── Pattern 2b ───────────────────────────────────────────────────────────
+    # "Top N for BOTH metric A and metric B" — using ORDER BY a, b LIMIT N
+    # ranks by a (b is just tiebreaker). Needs two independent RANK() windows.
+    # Detectable: ORDER BY has two or more columns AND LIMIT present AND no RANK/ROW_NUMBER.
+    if (
+        re.search(r"\border\s+by\b[^;]+,", sql_lower)        # ORDER BY with multiple cols
+        and re.search(r"\blimit\s+\d+", sql_lower)
+        and not re.search(r"\b(?:rank|row_number|dense_rank)\s*\(", sql_lower)
+        and re.search(r"\bsum\s*\(", sql_lower)               # aggregation present
+    ):
+        issues.append({
+            "pattern_name": "dual_metric_limit_not_dual_rank",
+            "description": (
+                "POSSIBLE BUG — ORDER BY metricA, metricB LIMIT N is NOT two independent "
+                "rankings. metricB is only a tiebreaker; the LIMIT picks top-N by metricA. "
+                "If the question asks for items that rank in the top N for BOTH metrics "
+                "independently, you must use two separate RANK() window functions."
+            ),
+            "correction": (
+                "Use two independent RANK() windows and filter where both ranks <= N:\n"
+                "\n"
+                "SELECT * FROM (\n"
+                "    SELECT product_id,\n"
+                "           SUM(metric_a) AS metric_a,\n"
+                "           SUM(metric_b) AS metric_b,\n"
+                "           RANK() OVER (ORDER BY SUM(metric_a) DESC) AS rank_a,\n"
+                "           RANK() OVER (ORDER BY SUM(metric_b) DESC) AS rank_b\n"
+                "    FROM ...\n"
+                "    GROUP BY product_id\n"
+                ") t\n"
+                "WHERE rank_a <= N AND rank_b <= N"
+            ),
+        })
+
     # ── Pattern 3a ───────────────────────────────────────────────────────────
     # WHERE status filter alongside CASE WHEN status — wrong denominator.
     # When computing "percentage of X vs Y", the WHERE clause must NOT pre-filter

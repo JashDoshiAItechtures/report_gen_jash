@@ -161,6 +161,86 @@ class AnalyzeAndPlan(dspy.Signature):
     Use product_id as the only product identifier. Never invent table names.
 
     ══════════════════════════════════════════════════════════════
+    RULE 1C0 — "TOP/BEST PER GROUP" REQUIRES ROW_NUMBER PARTITION BY
+    ══════════════════════════════════════════════════════════════
+    Questions like "top customer per city", "best product per category",
+    "highest revenue vendor per region" are PER-GROUP ranking problems.
+    A global ORDER BY + LIMIT returns the global top — NOT one per group.
+
+    WRONG (global sort — returns all rows or wrong subset):
+      SELECT city, customer_id, SUM(total_amount) AS rev
+      FROM ... GROUP BY city, customer_id
+      ORDER BY rev DESC          ← sorts globally, does NOT pick one per city
+
+    CORRECT (ROW_NUMBER partitioned by the group column, filter rank = 1):
+      SELECT city, customer_id, customer_name, total_revenue
+      FROM (
+          SELECT cm.city, cm.customer_id, cm.customer_name,
+                 SUM(so.total_amount) AS total_revenue,
+                 ROW_NUMBER() OVER (PARTITION BY cm.city
+                                    ORDER BY SUM(so.total_amount) DESC) AS rnk
+          FROM sales_table_v2_sales_order so
+          JOIN sales_table_v2_customer_master cm ON so.customer_id = cm.customer_id
+          WHERE so.status = 'closed'
+          GROUP BY cm.city, cm.customer_id, cm.customer_name
+      ) t
+      WHERE rnk = 1
+      ORDER BY total_revenue DESC
+
+    Trigger words: "per city", "per region", "per category", "for each X … top/best/highest".
+
+    ══════════════════════════════════════════════════════════════
+    RULE 1C1 — "TOP N FOR BOTH X AND Y" REQUIRES TWO INDEPENDENT RANKs
+    ══════════════════════════════════════════════════════════════
+    "Top 5 by revenue AND top 5 by diamond cost" means a product must be in
+    the top 5 on EACH metric independently.
+    ORDER BY revenue DESC, cost DESC LIMIT 5 is NOT two rankings — it ranks
+    by revenue and uses cost only as a tiebreaker, returning the wrong result.
+
+    WRONG:
+      ORDER BY revenue DESC, diamond_cost DESC LIMIT 5   ← not two rankings
+
+    CORRECT (two independent RANK() window functions, filter where both <= N):
+      SELECT product_id, revenue, diamond_cost, rev_rank, diamond_rank
+      FROM (
+          SELECT lp.product_id,
+                 SUM(lp.line_total) AS revenue,
+                 SUM(lp.diamond_amount_per_unit * lp.quantity) AS diamond_cost,
+                 RANK() OVER (ORDER BY SUM(lp.line_total) DESC) AS rev_rank,
+                 RANK() OVER (ORDER BY SUM(lp.diamond_amount_per_unit * lp.quantity) DESC)
+                              AS diamond_rank
+          FROM sales_table_v2_sales_order_line_pricing lp
+          JOIN sales_table_v2_sales_order_line sol ON lp.sol_id = sol.sol_id
+          JOIN sales_table_v2_sales_order so ON sol.so_id = so.so_id
+          WHERE so.status = 'closed'
+          GROUP BY lp.product_id
+      ) t
+      WHERE rev_rank <= 5 AND diamond_rank <= 5
+
+    ══════════════════════════════════════════════════════════════
+    RULE 1C2 — CUMULATIVE/RUNNING WINDOW NEEDS PRE-AGGREGATION
+    ══════════════════════════════════════════════════════════════
+    Applying SUM(...) OVER (ORDER BY date) directly on raw order rows produces
+    one cumulative row per ORDER (not per date). Multiple orders on the same
+    date get separate cumulative values — wrong.
+    Always GROUP BY date first in a subquery, then apply the window on top.
+
+    WRONG (window over raw rows — one row per order, same date repeats):
+      SELECT order_date, SUM(total_amount) OVER (ORDER BY order_date) AS cum_rev
+      FROM sales_table_v2_sales_order WHERE status = 'closed'
+
+    CORRECT (aggregate by date first, then window):
+      SELECT order_date, daily_revenue,
+             SUM(daily_revenue) OVER (ORDER BY order_date) AS cumulative_revenue
+      FROM (
+          SELECT order_date::date AS order_date, SUM(total_amount) AS daily_revenue
+          FROM sales_table_v2_sales_order
+          WHERE status = 'closed'
+          GROUP BY order_date::date
+      ) t
+      ORDER BY order_date
+
+    ══════════════════════════════════════════════════════════════
     RULE 1D0 — PERCENTAGE / RATIO WITH CASE WHEN — NEVER PRE-FILTER STATUS
     ══════════════════════════════════════════════════════════════
     When computing a percentage breakdown across different statuses
@@ -542,6 +622,20 @@ class SQLGeneration(dspy.Signature):
         For both in same order: use INTERSECT on sales_order_line.
 
     4d. NO product_master table — never reference it; use product_id only.
+
+    4c0. "TOP/BEST PER GROUP" → use ROW_NUMBER() PARTITION BY the group column, filter rnk = 1.
+         WRONG: GROUP BY city, customer ORDER BY revenue DESC (global sort, not per-city top)
+         CORRECT: ROW_NUMBER() OVER (PARTITION BY city ORDER BY revenue DESC) AS rnk … WHERE rnk = 1
+
+    4c1. "TOP N FOR BOTH X AND Y" → two independent RANK() window functions, filter both <= N.
+         WRONG: ORDER BY revenue DESC, cost DESC LIMIT 5  (cost is just tiebreaker, not ranked)
+         CORRECT: RANK() OVER (ORDER BY revenue DESC) AS rev_rank,
+                  RANK() OVER (ORDER BY cost DESC) AS cost_rank … WHERE rev_rank<=5 AND cost_rank<=5
+
+    4c2. CUMULATIVE/RUNNING WINDOW → always GROUP BY date first in a subquery, then apply window.
+         WRONG: SUM(total_amount) OVER (ORDER BY order_date) FROM sales_order  (per-row window)
+         CORRECT: SUM(daily_revenue) OVER (ORDER BY order_date) FROM (SELECT order_date::date,
+                  SUM(total_amount) AS daily_revenue FROM ... GROUP BY order_date::date) t
 
     4d0. PERCENTAGE WITH CASE WHEN — never add WHERE status filter on the same column:
          When splitting by status with CASE WHEN, the denominator must include ALL rows.
