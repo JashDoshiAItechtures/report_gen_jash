@@ -88,11 +88,29 @@ class AnalyzeAndPlan(dspy.Signature):
       → NEVER sum gold_amount + diamond_amount from PO line tables — that misses labour.
 
     ══════════════════════════════════════════════════════════════
-    RULE 2 — STATUS FILTERING
+    RULE 2 — STATUS FILTERING (DEFAULT = 'closed', ALWAYS)
     ══════════════════════════════════════════════════════════════
-    For ALL revenue, sales, AOV, and financial metrics:
-      → WHERE status = 'closed' on sales_table_v2_sales_order
-    For product catalog or inventory questions: no status filter needed.
+    For ANY query that touches sales_table_v2_sales_order, the DEFAULT
+    is to always filter WHERE status = 'closed'.
+
+    ONLY skip or change this filter when the question EXPLICITLY mentions
+    a different status by name — e.g. "pending orders", "open orders",
+    "cancelled orders", "all orders regardless of status".
+    If the question does not mention any status word, use status = 'closed'.
+
+    This applies to every type of sales_order query:
+      • Revenue, AOV, total sales, order value
+      • Order count ("how many orders", "number of orders")
+      • Top customers, top products, top SKUs by any metric
+      • Any SUM, AVG, COUNT on total_amount, line_total, or component costs
+      • Any JOIN that starts from or passes through sales_order
+      • Component cost queries from sales_order_line_pricing
+        (join back to sales_order and apply status = 'closed')
+
+    NEVER apply status = 'closed' to:
+      • Purchase order tables (they have a separate status column)
+      • Inventory tables
+      • Customer master / product lookup tables (no status column)
 
     ══════════════════════════════════════════════════════════════
     RULE 1.5 — AGGREGATION GRANULARITY (CRITICAL)
@@ -249,10 +267,23 @@ class SQLGeneration(dspy.Signature):
        - NEVER add gold_amount + diamond_amount or any component columns —
          that always gives the WRONG answer (misses labour, taxes, etc.)
 
-    6. CORRECT FORMULAS:
-       - Revenue:  SELECT SUM(total_amount) FROM sales_table_v2_sales_order WHERE status = 'closed'
-       - AOV:      SELECT AVG(total_amount) FROM sales_table_v2_sales_order WHERE status = 'closed'
-       - Per-product revenue: SUM(line_total) FROM sales_order_line_pricing (no extra JOIN needed)
+    6. STATUS = 'closed' IS THE DEFAULT FOR ALL SALES ORDER QUERIES:
+       Unless the question explicitly mentions a different status (e.g. "pending",
+       "open", "cancelled", "all orders"), ALWAYS add WHERE so.status = 'closed'.
+       This is not optional — omitting it returns incomplete/incorrect data.
+
+       Correct formulas:
+       - Revenue:           SUM(so.total_amount) ... WHERE so.status = 'closed'
+       - AOV:               AVG(so.total_amount) ... WHERE so.status = 'closed'
+       - Order count:       COUNT(DISTINCT so.so_id) ... WHERE so.status = 'closed'
+       - Per-product rev:   SUM(lp.line_total) FROM sales_order_line_pricing lp
+                            JOIN sales_table_v2_sales_order so ON so.so_id = sol.so_id
+                            WHERE so.status = 'closed'
+       - Component costs:   SUM(lp.diamond_amount_per_unit * lp.quantity)
+                            FROM sales_order_line_pricing lp
+                            JOIN sales_table_v2_sales_order_line sol ON lp.sol_id = sol.sol_id
+                            JOIN sales_table_v2_sales_order so ON sol.so_id = so.so_id
+                            WHERE so.status = 'closed'
 
     7. DATE FILTERING (order_date is TEXT 'YYYY-MM-DD'):
        - Use the EXACT year values from the [CONTEXT] block in the question.
