@@ -232,6 +232,66 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
                 ),
             })
 
+    # ── Pattern 1b ───────────────────────────────────────────────────────────
+    # "Top X per group" answered as a global sort instead of PARTITION BY ranking.
+    #
+    # Symptom: GROUP BY has 2+ columns, ORDER BY present, no LIMIT (all rows
+    # returned) and no window ranking function (ROW_NUMBER/RANK/DENSE_RANK/
+    # PARTITION BY). This returns every group-entity combination sorted globally
+    # instead of the top-1 (or top-N) within each group.
+    #
+    # Example: "top customer per city"
+    #   WRONG: GROUP BY city, customer ORDER BY revenue DESC  → 126 rows (all)
+    #   RIGHT: ROW_NUMBER() OVER (PARTITION BY city ORDER BY revenue DESC), WHERE rnk=1
+    has_window_ranking = bool(re.search(
+        r"\b(?:row_number|rank|dense_rank)\s*\(|\bpartition\s+by\b",
+        sql_lower,
+    ))
+    has_limit = bool(re.search(r"\blimit\s+\d+", sql_lower))
+    has_order_by = bool(re.search(r"\border\s+by\b", sql_lower))
+
+    if not has_window_ranking and has_order_by and not has_limit:
+        # Count distinct columns in GROUP BY clause
+        group_by_match = re.search(r"\bgroup\s+by\b(.+?)(?:\border\s+by\b|\blimit\b|\bhaving\b|$)",
+                                   sql_lower, re.DOTALL)
+        if group_by_match:
+            group_cols = [c.strip() for c in group_by_match.group(1).split(",") if c.strip()]
+            if len(group_cols) >= 2:
+                issues.append({
+                    "pattern_name": "top_per_group_missing_partition_by",
+                    "description": (
+                        "POSSIBLE WRONG RESULT — 'top per group' answered as a global sort. "
+                        "The query uses GROUP BY with multiple columns and ORDER BY, but has "
+                        "no PARTITION BY or ROW_NUMBER/RANK window function and no LIMIT. "
+                        "This returns ALL rows sorted globally — not one top row per group. "
+                        "For questions like 'top customer per city' or 'best product per category', "
+                        "you must use ROW_NUMBER() OVER (PARTITION BY group_col ORDER BY metric DESC) "
+                        "in a subquery, then filter WHERE rnk = 1 outside."
+                    ),
+                    "correction": (
+                        "Re-read the question. If it asks for the top item WITHIN each group "
+                        "(e.g. 'per city', 'per category', 'for each X'), use this pattern:\n"
+                        "\n"
+                        "SELECT group_col, entity_col, metric\n"
+                        "FROM (\n"
+                        "    SELECT group_col, entity_col,\n"
+                        "           SUM(metric_col) AS metric,\n"
+                        "           ROW_NUMBER() OVER (\n"
+                        "               PARTITION BY group_col\n"
+                        "               ORDER BY SUM(metric_col) DESC\n"
+                        "           ) AS rnk\n"
+                        "    FROM ...\n"
+                        "    WHERE so.status = 'closed'\n"
+                        "    GROUP BY group_col, entity_col\n"
+                        ") t\n"
+                        "WHERE rnk = 1\n"
+                        "ORDER BY metric DESC\n"
+                        "\n"
+                        "If the question asks for a global top (not per group), add LIMIT N "
+                        "to the original query instead."
+                    ),
+                })
+
     # ── Pattern 2a ───────────────────────────────────────────────────────────
     # Cumulative/running window applied directly to raw table rows without
     # pre-aggregating by date.  SUM(...) OVER (ORDER BY date) on a raw scan
