@@ -270,6 +270,15 @@ class AnalyzeAndPlan(dspy.Signature):
       • Component cost queries from sales_order_line_pricing
         (join back to sales_order and apply status = 'closed')
 
+    IMPORTANT — line-level tables have NO status column:
+      sales_order_line_pricing, sales_order_line_gold, sales_order_line_diamond,
+      and sales_order_line do NOT have a status column.
+      To apply the status filter when using these tables, you MUST join back to
+      sales_table_v2_sales_order and filter on so.status = 'closed':
+        JOIN sales_table_v2_sales_order_line     sol ON lp.sol_id = sol.sol_id
+        JOIN sales_table_v2_sales_order          so  ON sol.so_id = so.so_id
+        WHERE so.status = 'closed'
+
     NEVER apply status = 'closed' to:
       • Purchase order tables (they have a separate status column)
       • Inventory tables
@@ -490,7 +499,16 @@ class SQLGeneration(dspy.Signature):
        - NEVER add gold_amount + diamond_amount or any component columns —
          that always gives the WRONG answer (misses labour, taxes, etc.)
 
-    6. STATUS = 'closed' IS THE DEFAULT FOR ALL SALES ORDER QUERIES:
+    6. STATUS = 'closed' IS THE DEFAULT — AND LINE TABLES HAVE NO STATUS COLUMN:
+       sales_order_line_pricing / sales_order_line_gold / sales_order_line_diamond
+       do NOT have a status column. When using these tables, you MUST join back to
+       sales_table_v2_sales_order to apply the filter:
+         JOIN sales_table_v2_sales_order_line sol ON lp.sol_id = sol.sol_id
+         JOIN sales_table_v2_sales_order so ON sol.so_id = so.so_id
+         WHERE so.status = 'closed'
+       Omitting this join means ALL orders (cancelled, pending, open) are included — WRONG.
+
+    6b. STATUS = 'closed' IS THE DEFAULT FOR ALL SALES ORDER QUERIES:
        Unless the question explicitly mentions a different status (e.g. "pending",
        "open", "cancelled", "all orders"), ALWAYS add WHERE so.status = 'closed'.
        This is not optional — omitting it returns incomplete/incorrect data.

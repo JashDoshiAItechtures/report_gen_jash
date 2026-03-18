@@ -237,6 +237,58 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
     # Generic — works for gold_kt on pricing table, or any future similar mistake.
     issues.extend(check_column_table_mismatches(sql))
 
+    # ── Pattern 5 ────────────────────────────────────────────────────────────
+    # Sales line tables used without joining sales_order for the status filter.
+    # Any query on line-level tables (pricing, gold, diamond, sales_order_line)
+    # must join back to sales_table_v2_sales_order and apply status = 'closed'
+    # unless a different status is explicitly present in the SQL.
+    SALES_LINE_TABLES = {
+        "sales_table_v2_sales_order_line_pricing",
+        "sales_table_v2_sales_order_line_gold",
+        "sales_table_v2_sales_order_line_diamond",
+        "sales_table_v2_sales_order_line",
+    }
+    SALES_HEADER = "sales_table_v2_sales_order"
+
+    tables_in_sql = {t.lower() for t in re.findall(r'\b(\w+)\b', sql_lower)}
+    uses_line_table = bool(SALES_LINE_TABLES & tables_in_sql)
+    has_sales_header = SALES_HEADER in tables_in_sql
+    has_status_filter = bool(re.search(r"\bstatus\s*=", sql_lower))
+
+    if uses_line_table and not has_status_filter:
+        # Only flag if the header table is absent (status can't be filtered)
+        # OR if the header is present but status filter is still missing
+        issues.append({
+            "pattern_name": "missing_status_closed_on_line_tables",
+            "description": (
+                "MISSING status = 'closed' filter: the query uses sales line tables "
+                "(sales_order_line_pricing / sales_order_line_gold / sales_order_line_diamond) "
+                "but does not filter by sales_order status. "
+                "Line tables have no status column — you must JOIN sales_table_v2_sales_order "
+                "and add WHERE so.status = 'closed' to exclude incomplete/cancelled orders."
+            ),
+            "correction": (
+                "Add a JOIN to sales_table_v2_sales_order and filter by status:\n"
+                "\n"
+                "JOIN sales_table_v2_sales_order_line     sol ON lp.sol_id = sol.sol_id\n"
+                "JOIN sales_table_v2_sales_order          so  ON sol.so_id = so.so_id\n"
+                "WHERE so.status = 'closed'\n"
+                "\n"
+                "Full corrected structure example:\n"
+                "SELECT g.gold_kt,\n"
+                "       SUM(lp.gold_amount_per_unit    * lp.quantity) AS total_gold_amount,\n"
+                "       SUM(lp.diamond_amount_per_unit * lp.quantity) AS total_diamond_amount,\n"
+                "       SUM(lp.making_charges_per_unit * lp.quantity) AS total_making_charges\n"
+                "FROM sales_table_v2_sales_order_line_pricing lp\n"
+                "JOIN sales_table_v2_sales_order_line_gold g  ON lp.sol_id = g.sol_id\n"
+                "JOIN sales_table_v2_sales_order_line     sol ON lp.sol_id = sol.sol_id\n"
+                "JOIN sales_table_v2_sales_order          so  ON sol.so_id = so.so_id\n"
+                "WHERE so.status = 'closed'\n"
+                "GROUP BY g.gold_kt\n"
+                "ORDER BY g.gold_kt"
+            ),
+        })
+
     return issues
 
 
