@@ -35,9 +35,21 @@ class GenerateSQLResponse(BaseModel):
     sql: str
 
 
+class ExecuteSQLRequest(BaseModel):
+    sql: str
+
+
+class ExecuteSQLResponse(BaseModel):
+    sql: str
+    data: list
+    row_count: int
+    error: str | None = None
+
+
 class ChatResponse(BaseModel):
     sql: str
     data: list
+    row_count: int
     answer: str
     insights: str
 
@@ -46,11 +58,44 @@ class ChatResponse(BaseModel):
 
 @app.post("/generate-sql", response_model=GenerateSQLResponse)
 def generate_sql_endpoint(req: QuestionRequest):
+    """Generate SQL for a question without executing it."""
     from ai.pipeline import SQLAnalystPipeline
 
     pipeline = SQLAnalystPipeline(provider=req.provider)
     sql = pipeline.generate_sql_only(req.question)
     return GenerateSQLResponse(sql=sql)
+
+
+@app.post("/execute-sql", response_model=ExecuteSQLResponse)
+def execute_sql_endpoint(req: ExecuteSQLRequest):
+    """Execute a raw SQL SELECT query and return the results."""
+    from ai.validator import validate_sql
+    from db.executor import execute_sql
+
+    is_safe, reason = validate_sql(req.sql)
+    if not is_safe:
+        return ExecuteSQLResponse(
+            sql=req.sql,
+            data=[],
+            row_count=0,
+            error=f"Query rejected: {reason}",
+        )
+
+    result = execute_sql(req.sql)
+    if not result["success"]:
+        return ExecuteSQLResponse(
+            sql=req.sql,
+            data=[],
+            row_count=0,
+            error=result["error"],
+        )
+
+    data = result["data"]
+    return ExecuteSQLResponse(
+        sql=req.sql,
+        data=data,
+        row_count=len(data),
+    )
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -108,7 +153,13 @@ def chat_endpoint(req: QuestionRequest):
         query_result=(result["data"][:200] if result.get("data") else None),
     )
 
-    return ChatResponse(**result)
+    return ChatResponse(
+        sql=result["sql"],
+        data=result["data"],
+        row_count=len(result.get("data") or []),
+        answer=result["answer"],
+        insights=result["insights"],
+    )
 
 
 # ── Schema info endpoint (for debugging / transparency) ─────────────────────
@@ -124,6 +175,40 @@ def delete_turn_endpoint(turn_id: int):
     from db.memory import delete_turn
     delete_turn(turn_id)
     return {"ok": True}
+
+
+@app.get("/history/{turn_id}/sql")
+def history_sql_endpoint(turn_id: int):
+    """Return just the SQL query for a specific history turn."""
+    from db.memory import get_turn_by_id
+    turn = get_turn_by_id(turn_id)
+    if not turn:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Turn not found")
+    return {"turn_id": turn_id, "sql": turn.get("sql_query")}
+
+
+@app.get("/history/{turn_id}/result")
+def history_result_endpoint(turn_id: int):
+    """Return just the query result data for a specific history turn."""
+    from db.memory import get_turn_by_id
+    turn = get_turn_by_id(turn_id)
+    if not turn:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Turn not found")
+    data = turn.get("query_result") or []
+    return {"turn_id": turn_id, "data": data, "row_count": len(data)}
+
+
+@app.get("/history/{turn_id}/answer")
+def history_answer_endpoint(turn_id: int):
+    """Return just the AI answer/explanation for a specific history turn."""
+    from db.memory import get_turn_by_id
+    turn = get_turn_by_id(turn_id)
+    if not turn:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Turn not found")
+    return {"turn_id": turn_id, "question": turn.get("question"), "answer": turn.get("answer")}
 
 
 @app.get("/schema")

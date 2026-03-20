@@ -119,6 +119,30 @@ def get_full_history(conversation_id: str) -> List[Dict[str, Any]]:
     return result
 
 
+def get_turn_by_id(turn_id: int) -> Dict[str, Any] | None:
+    """Return a single history turn by its primary key id."""
+    _ensure_table()
+    engine = get_engine()
+    query = text(
+        """
+        SELECT id, question, answer, sql_query, query_result, created_at
+        FROM chat_history
+        WHERE id = :id
+        """
+    )
+    with engine.connect() as conn:
+        row = conn.execute(query, {"id": turn_id}).mappings().first()
+    if row is None:
+        return None
+    result = dict(row)
+    if result.get("query_result"):
+        try:
+            result["query_result"] = json.loads(result["query_result"])
+        except (json.JSONDecodeError, TypeError):
+            result["query_result"] = None
+    return result
+
+
 def get_recent_history(conversation_id: str, limit: int = 5) -> List[Dict[str, Any]]:
     """Return the most recent `limit` turns for a conversation (oldest first)."""
     _ensure_table()
