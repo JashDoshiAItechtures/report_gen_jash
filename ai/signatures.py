@@ -155,10 +155,11 @@ class AnalyzeAndPlan(dspy.Signature):
       )
 
     ══════════════════════════════════════════════════════════════
-    RULE 1D — NO product_master TABLE EXISTS
+    RULE 1D — product_master TABLE EXISTS — USE IT FOR PRODUCT NAMES
     ══════════════════════════════════════════════════════════════
-    There is no product_master, products, or product_catalog table.
-    Use product_id as the only product identifier. Never invent table names.
+    The product_master table exists with columns: product_id, product_name, category, occasion, gender, is_active.
+    When a question asks for product names, JOIN product_master ON product_id to get product_name.
+    Never invent table names not present in the provided schema.
 
     ══════════════════════════════════════════════════════════════
     RULE 1B2 — SELECT DISTINCT WHEN JOINING HEADER TO LINE TABLES
@@ -415,10 +416,10 @@ class AnalyzeAndPlan(dspy.Signature):
     Apply this filter on sales_order_line or sales_order_line_pricing.
 
     ══════════════════════════════════════════════════════════════
-    RULE 1D — NO product_master TABLE EXISTS
+    RULE 1D — product_master TABLE EXISTS — USE IT FOR PRODUCT NAMES
     ══════════════════════════════════════════════════════════════
-    There is no product_master, products, or product_catalog table in this schema.
-    Product names do not exist — use product_id as the only product identifier.
+    The product_master table exists with columns: product_id, product_name, category, occasion, gender, is_active.
+    When a question asks for product names, JOIN product_master ON product_id to get product_name.
     Never reference a table that is not in the provided schema.
 
     ══════════════════════════════════════════════════════════════
@@ -622,8 +623,9 @@ class SQLGeneration(dspy.Signature):
         IGI → variant_sku LIKE '%-IGI'    NC → variant_sku LIKE '%-NC'
         Apply on sales_order_line or sales_order_line_pricing.
 
-    4d. NO product_master TABLE — never reference it; it does not exist in this schema.
-        Use product_id only. Never invent tables not present in schema_info.
+    4d. product_master TABLE EXISTS — use it for product names.
+        Columns: product_id, product_name, category, occasion, gender.
+        JOIN product_master ON product_id when product name is needed. Never invent tables not present in schema_info.
 
     4e. REVENUE SOURCE — never mix:
         Order-level: sales_order.total_amount
@@ -651,7 +653,7 @@ class SQLGeneration(dspy.Signature):
         CORRECT: WHERE variant_sku LIKE '%-IGI'
         For both in same order: use INTERSECT on sales_order_line.
 
-    4d. NO product_master table — never reference it; use product_id only.
+    4d. product_master TABLE EXISTS — JOIN it on product_id to get product_name, category, etc.
 
     4b2. SELECT header ID after joining line tables → always use SELECT DISTINCT:
          Joining sales_order → sales_order_line → pricing produces one row per line item.
