@@ -36,7 +36,7 @@ class AnalyzeAndPlan(dspy.Signature):
     ══════════════════════════════════════════════════════════════
 
     ORDER-LEVEL QUESTIONS (revenue, AOV, total sales, order value, total amount):
-      → Use: sales_table_v2_sales_order.total_amount
+      → Use: sales_order.total_amount
       → This is the PRE-COMPUTED grand total per order (includes all items,
         gold, diamonds, making charges, labour, taxes).
       → Examples: "total revenue", "AOV", "average order value", "total sales",
@@ -49,7 +49,7 @@ class AnalyzeAndPlan(dspy.Signature):
         per-line amount and will give wrong results.
 
     LINE-ITEM / PRODUCT-LEVEL QUESTIONS (per-product revenue, top products by sales):
-      → Use: sales_table_v2_sales_order_line_pricing.line_total
+      → Use: sales_order_line_pricing.line_total
       → Use ONLY when the question is about individual product/SKU performance.
       → Examples: "revenue per product", "top selling products by revenue",
         "which product generates most sales".
@@ -57,7 +57,7 @@ class AnalyzeAndPlan(dspy.Signature):
       → Still filter by sales_order.status = 'closed'.
 
     COMPONENT COST BY PRODUCT (diamond cost, gold cost, making charges per product):
-      → sales_table_v2_sales_order_line_pricing has ALL cost columns AND quantity.
+      → sales_order_line_pricing has ALL cost columns AND quantity.
         It is SELF-SUFFICIENT. NO JOIN to any other table is needed for cost queries.
       → Correct formula:  SUM(column * quantity)  — multiply every time, never skip.
       → Columns (all in sales_order_line_pricing):
@@ -70,7 +70,7 @@ class AnalyzeAndPlan(dspy.Signature):
       EXACT TEMPLATE — top 10 products by diamond cost:
             SELECT lp.product_id,
                    SUM(lp.diamond_amount_per_unit * lp.quantity) AS diamond_cost
-            FROM sales_table_v2_sales_order_line_pricing lp
+            FROM sales_order_line_pricing lp
             GROUP BY lp.product_id
             ORDER BY diamond_cost DESC
             LIMIT 10
@@ -83,7 +83,7 @@ class AnalyzeAndPlan(dspy.Signature):
           PROPERTIES such as shape, quality, karat, carat weight, size — NOT for cost/revenue.
 
     PURCHASE ORDER TOTALS:
-      → Use: purchase_orders_v6_purchase_order.total_amount
+      → Use: purchase_order.total_amount
       → For: "total amount of PO123", "PO value", "purchase order cost".
       → NEVER sum gold_amount + diamond_amount from PO line tables — that misses labour.
 
@@ -96,9 +96,9 @@ class AnalyzeAndPlan(dspy.Signature):
 
     WRONG (never write this):
       SELECT po.vendor_id, SUM(po.total_amount)
-      FROM purchase_orders_v6_purchase_order po
-      JOIN purchase_orders_v6_po_sales_order_link pl ON po.po_id = pl.po_id
-      JOIN sales_table_v2_sales_order so ON pl.so_id = so.so_id
+      FROM purchase_order po
+      JOIN po_sales_order_link pl ON po.po_id = pl.po_id
+      JOIN sales_order so ON pl.so_id = so.so_id
       WHERE so.status = 'closed'
       GROUP BY po.vendor_id
 
@@ -106,9 +106,9 @@ class AnalyzeAndPlan(dspy.Signature):
       SELECT vendor_id, SUM(total_amount) AS total_value
       FROM (
           SELECT DISTINCT po.po_id, po.vendor_id, po.total_amount
-          FROM purchase_orders_v6_purchase_order po
-          JOIN purchase_orders_v6_po_sales_order_link pl ON po.po_id = pl.po_id
-          JOIN sales_table_v2_sales_order so ON pl.so_id = so.so_id
+          FROM purchase_order po
+          JOIN po_sales_order_link pl ON po.po_id = pl.po_id
+          JOIN sales_order so ON pl.so_id = so.so_id
           WHERE so.status = 'closed'
       ) deduped
       GROUP BY vendor_id
@@ -131,7 +131,7 @@ class AnalyzeAndPlan(dspy.Signature):
           SELECT EXTRACT(YEAR  FROM order_date::date) AS yr,
                  EXTRACT(MONTH FROM order_date::date) AS mo,
                  SUM(total_amount) AS revenue
-          FROM sales_table_v2_sales_order
+          FROM sales_order
           GROUP BY yr, mo
       )
       SELECT yr, mo, revenue,
@@ -149,9 +149,9 @@ class AnalyzeAndPlan(dspy.Signature):
 
     For "customers with both IGI and NC in same order":
       WHERE so.so_id IN (
-          SELECT so_id FROM sales_table_v2_sales_order_line WHERE variant_sku LIKE '%-IGI'
+          SELECT so_id FROM sales_order_line WHERE variant_sku LIKE '%-IGI'
           INTERSECT
-          SELECT so_id FROM sales_table_v2_sales_order_line WHERE variant_sku LIKE '%-NC'
+          SELECT so_id FROM sales_order_line WHERE variant_sku LIKE '%-NC'
       )
 
     ══════════════════════════════════════════════════════════════
@@ -170,16 +170,16 @@ class AnalyzeAndPlan(dspy.Signature):
 
     WRONG (11,111 rows with duplicate so_ids):
       SELECT so.so_id
-      FROM sales_table_v2_sales_order so
-      JOIN sales_table_v2_sales_order_line sol ON so.so_id = sol.so_id
-      JOIN sales_table_v2_sales_order_line_pricing lp ON sol.sol_id = lp.sol_id
+      FROM sales_order so
+      JOIN sales_order_line sol ON so.so_id = sol.so_id
+      JOIN sales_order_line_pricing lp ON sol.sol_id = lp.sol_id
       WHERE lp.making_charges_per_unit > lp.diamond_amount_per_unit
 
     CORRECT (8,079 unique orders):
       SELECT DISTINCT so.so_id
-      FROM sales_table_v2_sales_order so
-      JOIN sales_table_v2_sales_order_line sol ON so.so_id = sol.so_id
-      JOIN sales_table_v2_sales_order_line_pricing lp ON sol.sol_id = lp.sol_id
+      FROM sales_order so
+      JOIN sales_order_line sol ON so.so_id = sol.so_id
+      JOIN sales_order_line_pricing lp ON sol.sol_id = lp.sol_id
       WHERE lp.making_charges_per_unit > lp.diamond_amount_per_unit
 
     Rule: if the SELECT list contains only header-level IDs/names (no aggregation,
@@ -209,8 +209,8 @@ class AnalyzeAndPlan(dspy.Signature):
                  SUM(so.total_amount) AS total_revenue,
                  ROW_NUMBER() OVER (PARTITION BY cm.city
                                     ORDER BY SUM(so.total_amount) DESC) AS rnk
-          FROM sales_table_v2_sales_order so
-          JOIN sales_table_v2_customer_master cm ON so.customer_id = cm.customer_id
+          FROM sales_order so
+          JOIN customer_master cm ON so.customer_id = cm.customer_id
           WHERE so.status = 'closed'
           GROUP BY cm.city, cm.customer_id, cm.customer_name
       ) t
@@ -239,9 +239,9 @@ class AnalyzeAndPlan(dspy.Signature):
                  RANK() OVER (ORDER BY SUM(lp.line_total) DESC) AS rev_rank,
                  RANK() OVER (ORDER BY SUM(lp.diamond_amount_per_unit * lp.quantity) DESC)
                               AS diamond_rank
-          FROM sales_table_v2_sales_order_line_pricing lp
-          JOIN sales_table_v2_sales_order_line sol ON lp.sol_id = sol.sol_id
-          JOIN sales_table_v2_sales_order so ON sol.so_id = so.so_id
+          FROM sales_order_line_pricing lp
+          JOIN sales_order_line sol ON lp.sol_id = sol.sol_id
+          JOIN sales_order so ON sol.so_id = so.so_id
           WHERE so.status = 'closed'
           GROUP BY lp.product_id
       ) t
@@ -257,14 +257,14 @@ class AnalyzeAndPlan(dspy.Signature):
 
     WRONG (window over raw rows — one row per order, same date repeats):
       SELECT order_date, SUM(total_amount) OVER (ORDER BY order_date) AS cum_rev
-      FROM sales_table_v2_sales_order WHERE status = 'closed'
+      FROM sales_order WHERE status = 'closed'
 
     CORRECT (aggregate by date first, then window):
       SELECT order_date, daily_revenue,
              SUM(daily_revenue) OVER (ORDER BY order_date) AS cumulative_revenue
       FROM (
           SELECT order_date::date AS order_date, SUM(total_amount) AS daily_revenue
-          FROM sales_table_v2_sales_order
+          FROM sales_order
           WHERE status = 'closed'
           GROUP BY order_date::date
       ) t
@@ -282,7 +282,7 @@ class AnalyzeAndPlan(dspy.Signature):
       SELECT customer_id,
           SUM(CASE WHEN status = 'closed' THEN total_amount ELSE 0 END) * 100.0
           / SUM(total_amount) AS pct_closed
-      FROM sales_table_v2_sales_order
+      FROM sales_order
       WHERE status IN ('closed', 'cancelled')   ← removes open/processing rows
       GROUP BY customer_id
 
@@ -292,8 +292,8 @@ class AnalyzeAndPlan(dspy.Signature):
                  * 100.0 / SUM(so.total_amount))::numeric, 2) AS pct_closed,
           ROUND((SUM(CASE WHEN so.status = 'cancelled' THEN so.total_amount ELSE 0 END)
                  * 100.0 / SUM(so.total_amount))::numeric, 2) AS pct_cancelled
-      FROM sales_table_v2_sales_order so
-      JOIN sales_table_v2_customer_master cm ON so.customer_id = cm.customer_id
+      FROM sales_order so
+      JOIN customer_master cm ON so.customer_id = cm.customer_id
       GROUP BY cm.customer_id, cm.customer_name
 
     ══════════════════════════════════════════════════════════════
@@ -360,10 +360,10 @@ class AnalyzeAndPlan(dspy.Signature):
              SUM(lp.gold_amount_per_unit    * lp.quantity) AS total_gold_amount,
              SUM(lp.diamond_amount_per_unit * lp.quantity) AS total_diamond_amount,
              SUM(lp.making_charges_per_unit * lp.quantity) AS total_making_charges
-      FROM sales_table_v2_sales_order_line_pricing lp
-      JOIN sales_table_v2_sales_order_line_gold g  ON lp.sol_id = g.sol_id
-      JOIN sales_table_v2_sales_order_line     sol ON lp.sol_id = sol.sol_id
-      JOIN sales_table_v2_sales_order          so  ON sol.so_id = so.so_id
+      FROM sales_order_line_pricing lp
+      JOIN sales_order_line_gold g  ON lp.sol_id = g.sol_id
+      JOIN sales_order_line     sol ON lp.sol_id = sol.sol_id
+      JOIN sales_order          so  ON sol.so_id = so.so_id
       WHERE so.status = 'closed'
       GROUP BY g.gold_kt
       ORDER BY g.gold_kt
@@ -371,32 +371,32 @@ class AnalyzeAndPlan(dspy.Signature):
     ══════════════════════════════════════════════════════════════
     RULE 1A — FAN-OUT: DEDUPLICATE BEFORE AGGREGATING ON JOIN CHAINS
     ══════════════════════════════════════════════════════════════
-    purchase_orders_v6_po_sales_order_link has MULTIPLE rows per po_id.
+    po_sales_order_link has MULTIPLE rows per po_id.
     Joining purchase_order → po_sales_order_link and then doing SUM(total_amount)
     counts the same PO amount once per linked sales order — WRONG.
 
     WRONG:
       SELECT po.vendor_id, SUM(po.total_amount)
-      FROM purchase_orders_v6_purchase_order po
-      JOIN purchase_orders_v6_po_sales_order_link lnk ON po.po_id = lnk.po_id
+      FROM purchase_order po
+      JOIN po_sales_order_link lnk ON po.po_id = lnk.po_id
       GROUP BY po.vendor_id
 
     CORRECT — wrap purchase_order in a DISTINCT subquery first:
       SELECT vendor_id, SUM(total_amount)
       FROM (
           SELECT DISTINCT po.po_id, po.vendor_id, po.total_amount
-          FROM purchase_orders_v6_purchase_order po
-          JOIN purchase_orders_v6_po_sales_order_link lnk ON po.po_id = lnk.po_id
+          FROM purchase_order po
+          JOIN po_sales_order_link lnk ON po.po_id = lnk.po_id
       ) deduped
       GROUP BY vendor_id
 
     Apply the DISTINCT-subquery fix whenever po_sales_order_link is in the JOIN chain
-    and you are aggregating any column from purchase_orders_v6_purchase_order.
+    and you are aggregating any column from purchase_order.
 
     ══════════════════════════════════════════════════════════════
     RULE 1B — ROW MULTIPLICATION FROM DETAIL TABLE JOINS
     ══════════════════════════════════════════════════════════════
-    sales_table_v2_sales_order_line_diamond and purchase_orders_v6_po_line_diamond
+    sales_order_line_diamond and po_line_diamond
     have MULTIPLE rows per line item (one per diamond type/shape/quality).
     Joining them directly to pricing or header tables inflates every SUM.
     For cost calculations: use sales_order_line_pricing which already has
@@ -424,7 +424,7 @@ class AnalyzeAndPlan(dspy.Signature):
     ══════════════════════════════════════════════════════════════
     RULE 2 — STATUS FILTERING (DEFAULT = 'closed', ALWAYS)
     ══════════════════════════════════════════════════════════════
-    For ANY query that touches sales_table_v2_sales_order, the DEFAULT
+    For ANY query that touches sales_order, the DEFAULT
     is to always filter WHERE status = 'closed'.
 
     ONLY skip or change this filter when the question EXPLICITLY mentions
@@ -445,9 +445,9 @@ class AnalyzeAndPlan(dspy.Signature):
       sales_order_line_pricing, sales_order_line_gold, sales_order_line_diamond,
       and sales_order_line do NOT have a status column.
       To apply the status filter when using these tables, you MUST join back to
-      sales_table_v2_sales_order and filter on so.status = 'closed':
-        JOIN sales_table_v2_sales_order_line     sol ON lp.sol_id = sol.sol_id
-        JOIN sales_table_v2_sales_order          so  ON sol.so_id = so.so_id
+      sales_order and filter on so.status = 'closed':
+        JOIN sales_order_line     sol ON lp.sol_id = sol.sol_id
+        JOIN sales_order          so  ON sol.so_id = so.so_id
         WHERE so.status = 'closed'
 
     NEVER apply status = 'closed' to:
@@ -478,7 +478,7 @@ class AnalyzeAndPlan(dspy.Signature):
 
     CUSTOMER:
       • "by customer" / "per customer" / "top customers"
-          → GROUP BY sales_table_v2_customer_master.customer_id
+          → GROUP BY customer_master.customer_id
           → JOIN customer_master to get customer_name
 
     VENDOR:
@@ -499,7 +499,7 @@ class AnalyzeAndPlan(dspy.Signature):
     There are TWO completely separate order systems. NEVER confuse them.
 
     SALES ORDERS (outgoing — what customers buy from us):
-      → Primary table: sales_table_v2_sales_order
+      → Primary table: sales_order
       → IDs start with "SO" (e.g. SO13579)
       → Keywords: "sales order", "order", "customer order", "AOV", "revenue",
         "highest order", "best order", "what customers spent", "order value"
@@ -507,7 +507,7 @@ class AnalyzeAndPlan(dspy.Signature):
           "highest order" / "biggest sale" / "top sales order" / "total revenue" / "AOV"
 
     PURCHASE ORDERS (incoming — what we buy from vendors/suppliers):
-      → Primary table: purchase_orders_v6_purchase_order
+      → Primary table: purchase_order
       → IDs start with "PO" (e.g. PO08796)
       → Keywords: "purchase order", "PO", "vendor order", "supplier order",
         "highest purchase order", "best PO", "what we ordered from vendors"
@@ -517,7 +517,7 @@ class AnalyzeAndPlan(dspy.Signature):
     DISAMBIGUATION RULE:
       - If question mentions "purchase order", "PO", "vendor" → use purchase_orders_v6 tables.
       - If question mentions "sales order", "order", "revenue", "customer" → use sales_table_v2 tables.
-      - If ambiguous and no "purchase" keyword → default to sales_table_v2_sales_order.
+      - If ambiguous and no "purchase" keyword → default to sales_order.
 
     ══════════════════════════════════════════════════════════════
     RULE 3 — DATE FILTERING
@@ -580,13 +580,13 @@ class SQLGeneration(dspy.Signature):
        is ALWAYS WRONG — it fragments results into variant-level rows.
 
     2. SALES ORDER vs PURCHASE ORDER — NEVER CONFUSE THEM:
-       - "purchase order", "PO", "vendor" → purchase_orders_v6_purchase_order table
-       - "sales order", "order", "revenue", "AOV", "highest order" (without "purchase") → sales_table_v2_sales_order table
-       - Highest/biggest/top "purchase order" → purchase_orders_v6_purchase_order ORDER BY total_amount DESC
-       - Highest/biggest/top "order" or "sale" → sales_table_v2_sales_order ORDER BY total_amount DESC
+       - "purchase order", "PO", "vendor" → purchase_order table
+       - "sales order", "order", "revenue", "AOV", "highest order" (without "purchase") → sales_order table
+       - Highest/biggest/top "purchase order" → purchase_order ORDER BY total_amount DESC
+       - Highest/biggest/top "order" or "sale" → sales_order ORDER BY total_amount DESC
 
     3. COMPONENT COSTS (diamond/gold/making charges) — PRICING TABLE ONLY, NO JOINS:
-       - ONE table only: sales_table_v2_sales_order_line_pricing (alias: lp)
+       - ONE table only: sales_order_line_pricing (alias: lp)
        - Formula: SUM(lp.diamond_amount_per_unit * lp.quantity)   for diamond cost
                   SUM(lp.gold_amount_per_unit * lp.quantity)      for gold cost
                   SUM(lp.making_charges_per_unit * lp.quantity)   for making charges
@@ -597,11 +597,11 @@ class SQLGeneration(dspy.Signature):
        - Exact templates:
            Top products by diamond cost:
              SELECT lp.product_id, SUM(lp.diamond_amount_per_unit * lp.quantity) AS diamond_cost
-             FROM sales_table_v2_sales_order_line_pricing lp
+             FROM sales_order_line_pricing lp
              GROUP BY lp.product_id ORDER BY diamond_cost DESC LIMIT 10
            Top SKUs by gold cost:
              SELECT lp.variant_sku, SUM(lp.gold_amount_per_unit * lp.quantity) AS gold_cost
-             FROM sales_table_v2_sales_order_line_pricing lp
+             FROM sales_order_line_pricing lp
              GROUP BY lp.variant_sku ORDER BY gold_cost DESC LIMIT 10
 
     4. FAN-OUT — DISTINCT subquery when joining purchase_order to po_sales_order_link:
@@ -610,8 +610,8 @@ class SQLGeneration(dspy.Signature):
                JOIN po_sales_order_link lnk ON po.po_id = lnk.po_id GROUP BY po.vendor_id
        CORRECT: SELECT vendor_id, SUM(total_amount) FROM (
                     SELECT DISTINCT po.po_id, po.vendor_id, po.total_amount
-                    FROM purchase_orders_v6_purchase_order po
-                    JOIN purchase_orders_v6_po_sales_order_link lnk ON po.po_id = lnk.po_id
+                    FROM purchase_order po
+                    JOIN po_sales_order_link lnk ON po.po_id = lnk.po_id
                 ) deduped GROUP BY vendor_id
 
     4b. ROW MULTIPLICATION — never join sales_order_line_diamond or po_line_diamond
@@ -626,17 +626,17 @@ class SQLGeneration(dspy.Signature):
         Use product_id only. Never invent tables not present in schema_info.
 
     4e. REVENUE SOURCE — never mix:
-        Order-level: sales_table_v2_sales_order.total_amount
-        Line-level:  sales_table_v2_sales_order_line_pricing.line_total
+        Order-level: sales_order.total_amount
+        Line-level:  sales_order_line_pricing.line_total
 
     4. FAN-OUT — when joining purchase_order to po_sales_order_link, use DISTINCT subquery:
        WRONG:   SELECT po.vendor_id, SUM(po.total_amount) FROM purchase_order po
                 JOIN po_sales_order_link pl ON po.po_id = pl.po_id ... GROUP BY po.vendor_id
        CORRECT: SELECT vendor_id, SUM(total_amount) FROM (
                     SELECT DISTINCT po.po_id, po.vendor_id, po.total_amount
-                    FROM purchase_orders_v6_purchase_order po
-                    JOIN purchase_orders_v6_po_sales_order_link pl ON po.po_id = pl.po_id
-                    JOIN sales_table_v2_sales_order so ON pl.so_id = so.so_id
+                    FROM purchase_order po
+                    JOIN po_sales_order_link pl ON po.po_id = pl.po_id
+                    JOIN sales_order so ON pl.so_id = so.so_id
                     WHERE so.status = 'closed'
                 ) deduped GROUP BY vendor_id
 
@@ -705,17 +705,17 @@ class SQLGeneration(dspy.Signature):
         CORRECT: JOIN sales_order_line_gold g ON lp.sol_id = g.sol_id, then use g.gold_kt
 
     5. USE PRE-COMPUTED TOTALS — NEVER RECONSTRUCT THEM:
-       - For order-level metrics (revenue, AOV): use sales_table_v2_sales_order.total_amount
-       - For PO totals: use purchase_orders_v6_purchase_order.total_amount
+       - For order-level metrics (revenue, AOV): use sales_order.total_amount
+       - For PO totals: use purchase_order.total_amount
        - NEVER add gold_amount + diamond_amount or any component columns —
          that always gives the WRONG answer (misses labour, taxes, etc.)
 
     6. STATUS = 'closed' IS THE DEFAULT — AND LINE TABLES HAVE NO STATUS COLUMN:
        sales_order_line_pricing / sales_order_line_gold / sales_order_line_diamond
        do NOT have a status column. When using these tables, you MUST join back to
-       sales_table_v2_sales_order to apply the filter:
-         JOIN sales_table_v2_sales_order_line sol ON lp.sol_id = sol.sol_id
-         JOIN sales_table_v2_sales_order so ON sol.so_id = so.so_id
+       sales_order to apply the filter:
+         JOIN sales_order_line sol ON lp.sol_id = sol.sol_id
+         JOIN sales_order so ON sol.so_id = so.so_id
          WHERE so.status = 'closed'
        Omitting this join means ALL orders (cancelled, pending, open) are included — WRONG.
 
@@ -729,12 +729,12 @@ class SQLGeneration(dspy.Signature):
        - AOV:               AVG(so.total_amount) ... WHERE so.status = 'closed'
        - Order count:       COUNT(DISTINCT so.so_id) ... WHERE so.status = 'closed'
        - Per-product rev:   SUM(lp.line_total) FROM sales_order_line_pricing lp
-                            JOIN sales_table_v2_sales_order so ON so.so_id = sol.so_id
+                            JOIN sales_order so ON so.so_id = sol.so_id
                             WHERE so.status = 'closed'
        - Component costs:   SUM(lp.diamond_amount_per_unit * lp.quantity)
                             FROM sales_order_line_pricing lp
-                            JOIN sales_table_v2_sales_order_line sol ON lp.sol_id = sol.sol_id
-                            JOIN sales_table_v2_sales_order so ON sol.so_id = so.so_id
+                            JOIN sales_order_line sol ON lp.sol_id = sol.sol_id
+                            JOIN sales_order so ON sol.so_id = so.so_id
                             WHERE so.status = 'closed'
 
     7. DATE FILTERING (order_date is TEXT 'YYYY-MM-DD'):

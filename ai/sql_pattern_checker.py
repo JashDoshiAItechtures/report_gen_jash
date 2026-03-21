@@ -126,7 +126,7 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
             "pattern_name": "fanout_po_link",
             "description": (
                 "CRITICAL BUG — fan-out on po_sales_order_link: "
-                "purchase_orders_v6_po_sales_order_link has MULTIPLE rows per po_id "
+                "po_sales_order_link has MULTIPLE rows per po_id "
                 "(one per linked sales order). Joining purchase_order to this table "
                 "and then doing SUM(total_amount) counts the same PO amount 2-3 times, "
                 "producing an inflated result (e.g. ₹4,239 Cr instead of ₹1,580 Cr)."
@@ -138,9 +138,9 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
                 "SELECT vendor_id, SUM(total_amount) AS total_value\n"
                 "FROM (\n"
                 "    SELECT DISTINCT po.po_id, po.vendor_id, po.total_amount\n"
-                "    FROM purchase_orders_v6_purchase_order po\n"
-                "    JOIN purchase_orders_v6_po_sales_order_link pl ON po.po_id = pl.po_id\n"
-                "    JOIN sales_table_v2_sales_order so ON pl.so_id = so.so_id\n"
+                "    FROM purchase_order po\n"
+                "    JOIN po_sales_order_link pl ON po.po_id = pl.po_id\n"
+                "    JOIN sales_order so ON pl.so_id = so.so_id\n"
                 "    WHERE so.status = 'closed'\n"
                 ") deduped\n"
                 "GROUP BY vendor_id\n"
@@ -182,7 +182,7 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
                         "        EXTRACT(YEAR  FROM order_date::date) AS yr,\n"
                         "        EXTRACT(MONTH FROM order_date::date) AS mo,\n"
                         "        SUM(total_amount) AS revenue\n"
-                        "    FROM sales_table_v2_sales_order\n"
+                        "    FROM sales_order\n"
                         "    GROUP BY yr, mo\n"
                         ")\n"
                         "SELECT yr, mo, revenue,\n"
@@ -218,15 +218,15 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
                     "  IGI certified  → variant_sku LIKE '%-IGI'\n"
                     "  Non-certified  → variant_sku LIKE '%-NC'\n"
                     "\n"
-                    "Apply on sales_table_v2_sales_order_line or sales_order_line_pricing.\n"
+                    "Apply on sales_order_line or sales_order_line_pricing.\n"
                     "\n"
                     "CORRECT pattern (customers with both IGI and NC in same order):\n"
-                    "SELECT customer_id FROM sales_table_v2_sales_order so\n"
+                    "SELECT customer_id FROM sales_order so\n"
                     "WHERE so.so_id IN (\n"
-                    "    SELECT so_id FROM sales_table_v2_sales_order_line\n"
+                    "    SELECT so_id FROM sales_order_line\n"
                     "    WHERE variant_sku LIKE '%-IGI'\n"
                     "    INTERSECT\n"
-                    "    SELECT so_id FROM sales_table_v2_sales_order_line\n"
+                    "    SELECT so_id FROM sales_order_line\n"
                     "    WHERE variant_sku LIKE '%-NC'\n"
                     ")"
                 ),
@@ -238,14 +238,14 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
     # Detectable: SELECT has a header ID, JOINs include line tables, no DISTINCT,
     # no aggregation (COUNT/SUM/AVG/etc.) in the SELECT list.
     SALES_LINE_TABLES_SET = {
-        "sales_table_v2_sales_order_line",
-        "sales_table_v2_sales_order_line_pricing",
-        "sales_table_v2_sales_order_line_gold",
-        "sales_table_v2_sales_order_line_diamond",
-        "purchase_orders_v6_po_line_items",
-        "purchase_orders_v6_po_line_pricing",
-        "purchase_orders_v6_po_line_diamond",
-        "purchase_orders_v6_po_line_gold",
+        "sales_order_line",
+        "sales_order_line_pricing",
+        "sales_order_line_gold",
+        "sales_order_line_diamond",
+        "po_line_items",
+        "po_line_pricing",
+        "po_line_diamond",
+        "po_line_gold",
     }
     HEADER_IDS = {"so_id", "po_id", "sol_id", "pol_id"}
 
@@ -377,7 +377,7 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
                     "FROM (\n"
                     "    SELECT order_date::date AS order_date,\n"
                     "           SUM(total_amount) AS daily_revenue\n"
-                    "    FROM sales_table_v2_sales_order\n"
+                    "    FROM sales_order\n"
                     "    WHERE status = 'closed'\n"
                     "    GROUP BY order_date::date\n"
                     ") t\n"
@@ -448,8 +448,8 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
                 "           * 100.0 / SUM(so.total_amount))::numeric, 2) AS pct_closed,\n"
                 "    ROUND((SUM(CASE WHEN so.status = 'cancelled' THEN so.total_amount ELSE 0 END)\n"
                 "           * 100.0 / SUM(so.total_amount))::numeric, 2) AS pct_cancelled\n"
-                "FROM sales_table_v2_sales_order so\n"
-                "JOIN sales_table_v2_customer_master cm ON so.customer_id = cm.customer_id\n"
+                "FROM sales_order so\n"
+                "JOIN customer_master cm ON so.customer_id = cm.customer_id\n"
                 "GROUP BY cm.customer_id, cm.customer_name\n"
                 "\n"
                 "No WHERE on status — SUM(so.total_amount) must include ALL orders as denominator."
@@ -517,15 +517,15 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
     # ── Pattern 5 ────────────────────────────────────────────────────────────
     # Sales line tables used without joining sales_order for the status filter.
     # Any query on line-level tables (pricing, gold, diamond, sales_order_line)
-    # must join back to sales_table_v2_sales_order and apply status = 'closed'
+    # must join back to sales_order and apply status = 'closed'
     # unless a different status is explicitly present in the SQL.
     SALES_LINE_TABLES = {
-        "sales_table_v2_sales_order_line_pricing",
-        "sales_table_v2_sales_order_line_gold",
-        "sales_table_v2_sales_order_line_diamond",
-        "sales_table_v2_sales_order_line",
+        "sales_order_line_pricing",
+        "sales_order_line_gold",
+        "sales_order_line_diamond",
+        "sales_order_line",
     }
-    SALES_HEADER = "sales_table_v2_sales_order"
+    SALES_HEADER = "sales_order"
 
     tables_in_sql = {t.lower() for t in re.findall(r'\b(\w+)\b', sql_lower)}
     uses_line_table = bool(SALES_LINE_TABLES & tables_in_sql)
@@ -541,14 +541,14 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
                 "MISSING status = 'closed' filter: the query uses sales line tables "
                 "(sales_order_line_pricing / sales_order_line_gold / sales_order_line_diamond) "
                 "but does not filter by sales_order status. "
-                "Line tables have no status column — you must JOIN sales_table_v2_sales_order "
+                "Line tables have no status column — you must JOIN sales_order "
                 "and add WHERE so.status = 'closed' to exclude incomplete/cancelled orders."
             ),
             "correction": (
-                "Add a JOIN to sales_table_v2_sales_order and filter by status:\n"
+                "Add a JOIN to sales_order and filter by status:\n"
                 "\n"
-                "JOIN sales_table_v2_sales_order_line     sol ON lp.sol_id = sol.sol_id\n"
-                "JOIN sales_table_v2_sales_order          so  ON sol.so_id = so.so_id\n"
+                "JOIN sales_order_line     sol ON lp.sol_id = sol.sol_id\n"
+                "JOIN sales_order          so  ON sol.so_id = so.so_id\n"
                 "WHERE so.status = 'closed'\n"
                 "\n"
                 "Full corrected structure example:\n"
@@ -556,10 +556,10 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
                 "       SUM(lp.gold_amount_per_unit    * lp.quantity) AS total_gold_amount,\n"
                 "       SUM(lp.diamond_amount_per_unit * lp.quantity) AS total_diamond_amount,\n"
                 "       SUM(lp.making_charges_per_unit * lp.quantity) AS total_making_charges\n"
-                "FROM sales_table_v2_sales_order_line_pricing lp\n"
-                "JOIN sales_table_v2_sales_order_line_gold g  ON lp.sol_id = g.sol_id\n"
-                "JOIN sales_table_v2_sales_order_line     sol ON lp.sol_id = sol.sol_id\n"
-                "JOIN sales_table_v2_sales_order          so  ON sol.so_id = so.so_id\n"
+                "FROM sales_order_line_pricing lp\n"
+                "JOIN sales_order_line_gold g  ON lp.sol_id = g.sol_id\n"
+                "JOIN sales_order_line     sol ON lp.sol_id = sol.sol_id\n"
+                "JOIN sales_order          so  ON sol.so_id = so.so_id\n"
                 "WHERE so.status = 'closed'\n"
                 "GROUP BY g.gold_kt\n"
                 "ORDER BY g.gold_kt"
