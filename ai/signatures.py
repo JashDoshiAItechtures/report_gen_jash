@@ -527,12 +527,12 @@ class AnalyzeAndPlan(dspy.Signature):
     current year, and exact date ranges for "last year" and "this year".
     ALWAYS read and use those exact date ranges from the [CONTEXT] block.
 
-    The order_date column is stored as TEXT in 'YYYY-MM-DD' format.
-    Use text comparisons ONLY — never EXTRACT() or CAST():
-      → Use the ranges exactly as given in the [CONTEXT] block.
+    The order_date column is a native DATE type.
+    Use standard date comparisons or EXTRACT():
       → "last year": order_date >= '<last_year>-01-01' AND order_date <= '<last_year>-12-31'
       → "this year": order_date >= '<current_year>-01-01' AND order_date <= '<current_year>-12-31'
       → "last month": use appropriate YYYY-MM-DD range relative to today's date.
+      → For year extraction: EXTRACT(YEAR FROM order_date) or date_part('year', order_date)
 
     Steps:
     1. READ the [CONTEXT] block to get current year and last year values.

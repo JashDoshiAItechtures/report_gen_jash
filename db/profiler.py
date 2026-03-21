@@ -219,13 +219,13 @@ def _generate_business_rules(schema: dict[str, list[dict]]) -> str:
     rules.append("  It has 'selling_price_per_unit' which is the actual price per 1 unit of a product.")
     rules.append("  For 'most expensive products', 'cheapest products', 'product price':")
     rules.append("    → Query sales_order_line_pricing and JOIN to product tables for product_name")
-    rules.append("    → Use selling_price_per_unit (NOT line_total_price, NOT selling_price from catalog)")
+    rules.append("    → Use selling_price_per_unit (NOT line_total, NOT selling_price from catalog)")
     rules.append("    → GROUP BY product_id, product_name and use MAX(selling_price_per_unit)")
     rules.append("    → Join path: sales_order_line_pricing.product_id = product_master.product_id")
-    rules.append("  Do NOT use product_variant_summary.selling_price or variant_sku_table.selling_price")
+    rules.append("  Do NOT use product_variant.selling_price as price — it is catalog/list price, not transaction price.")
     rules.append("  — those are catalog/list prices, not actual transaction prices.")
     rules.append("  For 'highest revenue products' or 'best selling products':")
-    rules.append("    → Use SUM(line_total_price) grouped by product, filtered by status='closed'")
+    rules.append("    → Use SUM(line_total) grouped by product, filtered by status='closed'")
 
     # ── Rule 3: Status filtering (only for transactional queries)
     rules.append("")
@@ -239,10 +239,10 @@ def _generate_business_rules(schema: dict[str, list[dict]]) -> str:
     # ── Rule 4: Unit price vs total price
     rules.append("")
     rules.append("RULE 4 — UNIT PRICE vs TOTAL PRICE:")
-    rules.append("  line_total_price = selling_price_per_unit × quantity (total for order line)")
+    rules.append("  line_total = selling_price_per_unit × quantity (total for order line)")
     rules.append("  selling_price_per_unit = the actual price of 1 unit of the product")
     rules.append("  base_price_per_unit = cost price of 1 unit before margin")
-    rules.append("  NEVER use line_total_price as a product's price — it includes quantity.")
+    rules.append("  NEVER use line_total as a product's price — it includes quantity.")
     rules.append("  To get a product's price: use selling_price_per_unit or selling_price column")
 
     # ── Rule 5: Common metrics formulas
@@ -250,7 +250,7 @@ def _generate_business_rules(schema: dict[str, list[dict]]) -> str:
     rules.append("RULE 5 — METRIC FORMULAS:")
     rules.append("  AOV = SUM(so.total_amount) / COUNT(DISTINCT so.so_id) WHERE so.status='closed'")
     rules.append("  Revenue = SUM(so.total_amount) WHERE so.status='closed'")
-    rules.append("  Most Expensive Product = MAX(pvs.selling_price) GROUP BY product_id, product_name")
+    rules.append("  Most Expensive Product = MAX(pv.selling_price_per_unit) FROM sales_order_line_pricing pv GROUP BY product_id")
     rules.append("  Margin % = (selling_price - base_price) / selling_price × 100")
     rules.append("  Order Count = COUNT(DISTINCT so.so_id) WHERE so.status='closed'")
 
@@ -258,10 +258,16 @@ def _generate_business_rules(schema: dict[str, list[dict]]) -> str:
     rules.append("")
     rules.append("RULE 6 — TABLE JOIN PATHS:")
     rules.append("  Sales chain: sales_order(so_id) → sales_order_line(so_id, sol_id) → sales_order_line_pricing(sol_id)")
-    rules.append("  Product chain: product_master(product_id) → product_variant_summary(product_id) → variant_sku_table(variant_sku)")
-    rules.append("  Sales ↔ Product: sales_order_line.variant_sku = variant_sku_table.variant_sku")
+    rules.append("  Gold detail: sales_order_line(sol_id) → sales_order_line_gold(sol_id) [gold_kt, gold_amount_per_unit, etc.]")
+    rules.append("  Diamond detail: sales_order_line(sol_id) → sales_order_line_diamond(sol_id) [carats, rate, quality, etc.]")
+    rules.append("  Product chain: product_master(product_id) → product_variant(product_id, variant_sku)")
+    rules.append("  Sales ↔ Product: sales_order_line.variant_sku = product_variant.variant_sku")
     rules.append("  Sales ↔ Customer: sales_order.customer_id = customer_master.customer_id")
     rules.append("  Sales ↔ Payment: sales_order.so_id = sales_order_payments.so_id")
+    rules.append("  PO chain: purchase_order(po_id) → po_line_items(po_id, pol_id, sol_id)")
+    rules.append("  PO pricing: po_line_items(pol_id) → po_line_pricing(pol_id)")
+    rules.append("  PO ↔ Sales (link): sales_allocation(po_id, so_id, sol_id, pol_id) — many-to-many bridge")
+    rules.append("  PO ↔ Vendor: purchase_order.vendor_id = vendor_master.vendor_id")
 
     return "\n".join(rules)
 
