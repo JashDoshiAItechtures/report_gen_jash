@@ -7,6 +7,7 @@ Detects relationships via:
 4. Fuzzy name matching (cust_id ≈ customer_id)
 """
 
+import time
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
@@ -14,6 +15,11 @@ from sqlalchemy import text
 
 from db.connection import get_engine
 from db.schema import get_schema
+
+# ── Cache ───────────────────────────────────────────────────────────────────
+_rel_cache: list | None = None
+_rel_cache_ts: float = 0.0
+_REL_CACHE_TTL: float = 600.0  # 10 minutes
 
 
 @dataclass
@@ -27,11 +33,17 @@ class Relationship:
 
 
 def discover_relationships() -> list[Relationship]:
-    """Return all discovered relationships across public tables."""
+    """Return all discovered relationships across public tables (cached)."""
+    global _rel_cache, _rel_cache_ts
+    if _rel_cache is not None and (time.time() - _rel_cache_ts < _REL_CACHE_TTL):
+        return _rel_cache
     rels: list[Relationship] = []
     rels.extend(_fk_relationships())
     rels.extend(_implicit_relationships())
-    return _deduplicate(rels)
+    result = _deduplicate(rels)
+    _rel_cache = result
+    _rel_cache_ts = time.time()
+    return result
 
 
 # ── Explicit FK relationships ───────────────────────────────────────────────
@@ -104,9 +116,11 @@ def _implicit_relationships() -> list[Relationship]:
                             confidence=0.75, source="id_pattern",
                         ))
 
-            # 3. Fuzzy matching for remaining column pairs
-            for c1 in cols1:
-                for c2 in cols2:
+            # 3. Fuzzy matching — only on _id/_key columns to avoid O(n²) explosion
+            id_cols1 = [c for c in cols1 if c.endswith(("_id", "_key"))]
+            id_cols2 = [c for c in cols2 if c.endswith(("_id", "_key"))]
+            for c1 in id_cols1:
+                for c2 in id_cols2:
                     if c1 == c2:
                         continue
                     ratio = SequenceMatcher(None, c1, c2).ratio()

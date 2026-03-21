@@ -114,10 +114,10 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
     sql_lower = sql.lower()
 
     # ── Pattern 1 ────────────────────────────────────────────────────────────
-    # Fan-out: purchase_order JOINed to po_sales_order_link with SUM but no
+    # Fan-out: purchase_order JOINed to sales_allocation with SUM but no
     # DISTINCT subquery → total_amount counted once per linked SO.
     if (
-        "po_sales_order_link" in sql_lower
+        "sales_allocation" in sql_lower
         and "purchase_order" in sql_lower
         and re.search(r"\bsum\s*\(", sql_lower)
         and "distinct" not in sql_lower
@@ -125,8 +125,8 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
         issues.append({
             "pattern_name": "fanout_po_link",
             "description": (
-                "CRITICAL BUG — fan-out on po_sales_order_link: "
-                "po_sales_order_link has MULTIPLE rows per po_id "
+                "CRITICAL BUG — fan-out on sales_allocation: "
+                "sales_allocation has MULTIPLE rows per po_id "
                 "(one per linked sales order). Joining purchase_order to this table "
                 "and then doing SUM(total_amount) counts the same PO amount 2-3 times, "
                 "producing an inflated result (e.g. ₹4,239 Cr instead of ₹1,580 Cr)."
@@ -139,14 +139,14 @@ def check_sql_patterns(sql: str) -> list[dict[str, Any]]:
                 "FROM (\n"
                 "    SELECT DISTINCT po.po_id, po.vendor_id, po.total_amount\n"
                 "    FROM purchase_order po\n"
-                "    JOIN po_sales_order_link pl ON po.po_id = pl.po_id\n"
+                "    JOIN sales_allocation pl ON po.po_id = pl.po_id\n"
                 "    JOIN sales_order so ON pl.so_id = so.so_id\n"
                 "    WHERE so.status = 'closed'\n"
                 ") deduped\n"
                 "GROUP BY vendor_id\n"
                 "ORDER BY total_value DESC\n"
                 "\n"
-                "NEVER do: SUM(po.total_amount) directly after joining po_sales_order_link."
+                "NEVER do: SUM(po.total_amount) directly after joining sales_allocation."
             ),
         })
 

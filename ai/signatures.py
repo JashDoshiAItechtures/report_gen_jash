@@ -88,16 +88,16 @@ class AnalyzeAndPlan(dspy.Signature):
       → NEVER sum gold_amount + diamond_amount from PO line tables — that misses labour.
 
     ══════════════════════════════════════════════════════════════
-    RULE 1A — FAN-OUT: purchase_order + po_sales_order_link
+    RULE 1A — FAN-OUT: purchase_order + sales_allocation
     ══════════════════════════════════════════════════════════════
-    po_sales_order_link has MULTIPLE rows per po_id (one per linked SO).
-    Joining purchase_order → po_sales_order_link and doing SUM(total_amount)
+    sales_allocation has MULTIPLE rows per po_id (one per linked SO).
+    Joining purchase_order → sales_allocation and doing SUM(total_amount)
     counts each PO's amount once per linked SO — completely wrong.
 
     WRONG (never write this):
       SELECT po.vendor_id, SUM(po.total_amount)
       FROM purchase_order po
-      JOIN po_sales_order_link pl ON po.po_id = pl.po_id
+      JOIN sales_allocation pl ON po.po_id = pl.po_id
       JOIN sales_order so ON pl.so_id = so.so_id
       WHERE so.status = 'closed'
       GROUP BY po.vendor_id
@@ -107,7 +107,7 @@ class AnalyzeAndPlan(dspy.Signature):
       FROM (
           SELECT DISTINCT po.po_id, po.vendor_id, po.total_amount
           FROM purchase_order po
-          JOIN po_sales_order_link pl ON po.po_id = pl.po_id
+          JOIN sales_allocation pl ON po.po_id = pl.po_id
           JOIN sales_order so ON pl.so_id = so.so_id
           WHERE so.status = 'closed'
       ) deduped
@@ -372,14 +372,14 @@ class AnalyzeAndPlan(dspy.Signature):
     ══════════════════════════════════════════════════════════════
     RULE 1A — FAN-OUT: DEDUPLICATE BEFORE AGGREGATING ON JOIN CHAINS
     ══════════════════════════════════════════════════════════════
-    po_sales_order_link has MULTIPLE rows per po_id.
-    Joining purchase_order → po_sales_order_link and then doing SUM(total_amount)
+    sales_allocation has MULTIPLE rows per po_id.
+    Joining purchase_order → sales_allocation and then doing SUM(total_amount)
     counts the same PO amount once per linked sales order — WRONG.
 
     WRONG:
       SELECT po.vendor_id, SUM(po.total_amount)
       FROM purchase_order po
-      JOIN po_sales_order_link lnk ON po.po_id = lnk.po_id
+      JOIN sales_allocation lnk ON po.po_id = lnk.po_id
       GROUP BY po.vendor_id
 
     CORRECT — wrap purchase_order in a DISTINCT subquery first:
@@ -387,11 +387,11 @@ class AnalyzeAndPlan(dspy.Signature):
       FROM (
           SELECT DISTINCT po.po_id, po.vendor_id, po.total_amount
           FROM purchase_order po
-          JOIN po_sales_order_link lnk ON po.po_id = lnk.po_id
+          JOIN sales_allocation lnk ON po.po_id = lnk.po_id
       ) deduped
       GROUP BY vendor_id
 
-    Apply the DISTINCT-subquery fix whenever po_sales_order_link is in the JOIN chain
+    Apply the DISTINCT-subquery fix whenever sales_allocation is in the JOIN chain
     and you are aggregating any column from purchase_order.
 
     ══════════════════════════════════════════════════════════════
@@ -605,14 +605,14 @@ class SQLGeneration(dspy.Signature):
              FROM sales_order_line_pricing lp
              GROUP BY lp.variant_sku ORDER BY gold_cost DESC LIMIT 10
 
-    4. FAN-OUT — DISTINCT subquery when joining purchase_order to po_sales_order_link:
-       po_sales_order_link has multiple rows per po_id → SUM(total_amount) double-counts.
+    4. FAN-OUT — DISTINCT subquery when joining purchase_order to sales_allocation:
+       sales_allocation has multiple rows per po_id → SUM(total_amount) double-counts.
        WRONG:  SELECT po.vendor_id, SUM(po.total_amount) FROM purchase_order po
-               JOIN po_sales_order_link lnk ON po.po_id = lnk.po_id GROUP BY po.vendor_id
+               JOIN sales_allocation lnk ON po.po_id = lnk.po_id GROUP BY po.vendor_id
        CORRECT: SELECT vendor_id, SUM(total_amount) FROM (
                     SELECT DISTINCT po.po_id, po.vendor_id, po.total_amount
                     FROM purchase_order po
-                    JOIN po_sales_order_link lnk ON po.po_id = lnk.po_id
+                    JOIN sales_allocation lnk ON po.po_id = lnk.po_id
                 ) deduped GROUP BY vendor_id
 
     4b. ROW MULTIPLICATION — never join sales_order_line_diamond or po_line_diamond
@@ -631,13 +631,13 @@ class SQLGeneration(dspy.Signature):
         Order-level: sales_order.total_amount
         Line-level:  sales_order_line_pricing.line_total
 
-    4. FAN-OUT — when joining purchase_order to po_sales_order_link, use DISTINCT subquery:
+    4. FAN-OUT — when joining purchase_order to sales_allocation, use DISTINCT subquery:
        WRONG:   SELECT po.vendor_id, SUM(po.total_amount) FROM purchase_order po
-                JOIN po_sales_order_link pl ON po.po_id = pl.po_id ... GROUP BY po.vendor_id
+                JOIN sales_allocation pl ON po.po_id = pl.po_id ... GROUP BY po.vendor_id
        CORRECT: SELECT vendor_id, SUM(total_amount) FROM (
                     SELECT DISTINCT po.po_id, po.vendor_id, po.total_amount
                     FROM purchase_order po
-                    JOIN po_sales_order_link pl ON po.po_id = pl.po_id
+                    JOIN sales_allocation pl ON po.po_id = pl.po_id
                     JOIN sales_order so ON pl.so_id = so.so_id
                     WHERE so.status = 'closed'
                 ) deduped GROUP BY vendor_id
