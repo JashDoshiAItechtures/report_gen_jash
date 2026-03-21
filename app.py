@@ -1,6 +1,7 @@
 """FastAPI application — AI SQL Analyst API and frontend server."""
 
 import logging
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -13,6 +14,32 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(name)s  %(message
 logger = logging.getLogger("api")
 
 app = FastAPI(title="AI SQL Analyst", version="1.0.0")
+
+
+def _warm_caches():
+    """Pre-build schema, relationship, and data-profile caches at startup.
+
+    Runs in a background thread so the server starts instantly and the first
+    user request hits pre-warmed caches instead of waiting 60+ seconds.
+    """
+    try:
+        logger.info("Cache warm-up — starting background pre-load...")
+        from db.schema import get_schema, format_schema
+        from db.relationships import format_relationships
+        from db.profiler import get_data_profile
+
+        format_schema()
+        logger.info("Cache warm-up — schema loaded")
+        format_relationships()
+        logger.info("Cache warm-up — relationships loaded")
+        get_data_profile()
+        logger.info("Cache warm-up — data profile loaded (all caches ready)")
+    except Exception as exc:
+        logger.warning("Cache warm-up failed (non-fatal): %s", exc)
+
+
+# Kick off cache pre-loading as soon as the module is imported
+threading.Thread(target=_warm_caches, daemon=True).start()
 
 # ── CORS ────────────────────────────────────────────────────────────────────
 app.add_middleware(

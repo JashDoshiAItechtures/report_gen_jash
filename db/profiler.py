@@ -24,6 +24,29 @@ _profile_ts: float = 0.0
 _PROFILE_TTL: float = 600.0  # 10 minutes
 
 
+# Only profile tables that are relevant to business queries.
+# Skipping raw material, job card, and other operational tables to keep
+# the first-call warm-up fast and the LLM prompt concise.
+_KEY_TABLES = {
+    "sales_order",
+    "sales_order_line",
+    "sales_order_line_pricing",
+    "sales_order_line_gold",
+    "sales_order_line_diamond",
+    "purchase_order",
+    "po_line_items",
+    "po_line_pricing",
+    "customer_master",
+    "vendor_master",
+    "product_master",
+    "product_variant",
+    "sales_allocation",
+    "sales_order_payments",
+    "sales_invoices",
+    "finished_goods_inventory",
+}
+
+
 def get_data_profile(force_refresh: bool = False) -> str:
     """Return a formatted data profile string for prompt injection."""
     global _profile_cache, _profile_ts
@@ -37,6 +60,8 @@ def get_data_profile(force_refresh: bool = False) -> str:
     engine = get_engine()
     with engine.connect() as conn:
         for table, columns in schema.items():
+            if table not in _KEY_TABLES:
+                continue
             table_profile = _profile_table(conn, table, columns)
             if table_profile:
                 profile_parts.append(table_profile)
