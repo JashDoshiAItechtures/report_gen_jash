@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Database ────────────────────────────────────────────────────────────────
-DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:universe@localhost:5432/postgres")
+DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:universe@localhost:5432/postgres").strip()
 
 # ── Groq ────────────────────────────────────────────────────────────────────
 GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
