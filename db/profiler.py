@@ -10,6 +10,8 @@ This info is injected into the AI prompts so it can make smart
 business decisions (e.g., filter by status='closed' for revenue).
 """
 
+import logging
+import threading
 import time
 from typing import Any
 
@@ -18,10 +20,68 @@ from sqlalchemy import text
 from db.connection import get_engine
 from db.schema import get_schema
 
-# ── Cache ───────────────────────────────────────────────────────────────────
+logger = logging.getLogger(__name__)
+
+# ── In-memory cache ──────────────────────────────────────────────────────────
 _profile_cache: str | None = None
 _profile_ts: float = 0.0
-_PROFILE_TTL: float = 600.0  # 10 minutes
+_PROFILE_TTL: float = 600.0        # 10 minutes in-memory TTL
+_DB_CACHE_TTL: float = 86400.0     # 24 hours DB cache TTL
+_is_building = threading.Event()   # set while background build is running
+_CACHE_KEY = "data_profile"
+
+
+# ── DB persistence helpers ───────────────────────────────────────────────────
+
+def _ensure_cache_table() -> None:
+    """Create system_cache table if it doesn't exist."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS system_cache (
+                cache_key  VARCHAR(100) PRIMARY KEY,
+                cache_value TEXT        NOT NULL,
+                built_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+
+
+def _load_from_db() -> str | None:
+    """Load profile from DB cache. Returns None if missing or too old."""
+    try:
+        engine = get_engine()
+        with engine.connect() as conn:
+            row = conn.execute(text(
+                "SELECT cache_value, built_at FROM system_cache WHERE cache_key = :k"
+            ), {"k": _CACHE_KEY}).fetchone()
+        if row is None:
+            return None
+        age = time.time() - row[1].timestamp()
+        if age > _DB_CACHE_TTL:
+            logger.info("DB profile cache is stale (%.0fh old) — will rebuild", age / 3600)
+            return None
+        logger.info("Profile loaded from DB cache (%.1fh old)", age / 3600)
+        return row[0]
+    except Exception as exc:
+        logger.warning("Could not load profile from DB: %s", exc)
+        return None
+
+
+def _save_to_db(profile: str) -> None:
+    """Persist profile string to DB so future startups are instant."""
+    try:
+        engine = get_engine()
+        with engine.begin() as conn:
+            conn.execute(text("""
+                INSERT INTO system_cache (cache_key, cache_value, built_at)
+                VALUES (:k, :v, NOW())
+                ON CONFLICT (cache_key)
+                DO UPDATE SET cache_value = EXCLUDED.cache_value,
+                              built_at    = EXCLUDED.built_at
+            """), {"k": _CACHE_KEY, "v": profile})
+        logger.info("Profile saved to DB cache")
+    except Exception as exc:
+        logger.warning("Could not save profile to DB: %s", exc)
 
 
 # Only profile tables that are relevant to business queries.
@@ -47,33 +107,79 @@ _KEY_TABLES = {
 }
 
 
-def get_data_profile(force_refresh: bool = False) -> str:
-    """Return a formatted data profile string for prompt injection."""
+def _do_build() -> None:
+    """Build the full profile from DB queries and cache it in memory + DB.
+
+    Called ONLY by the background warm-up thread. Sets _is_building for the
+    duration so callers know a build is in progress.
+    """
     global _profile_cache, _profile_ts
 
+    if _profile_cache and (time.time() - _profile_ts < _PROFILE_TTL):
+        return  # already fresh
+
+    _is_building.set()
+    try:
+        schema = get_schema()
+        profile_parts: list[str] = []
+        engine = get_engine()
+        with engine.connect() as conn:
+            for table, columns in schema.items():
+                if table not in _KEY_TABLES:
+                    continue
+                tprofile = _profile_table(conn, table, columns)
+                if tprofile:
+                    profile_parts.append(tprofile)
+
+        rules = _generate_business_rules(schema)
+        if rules:
+            profile_parts.append(rules)
+
+        built = "\n".join(profile_parts)
+        _profile_cache = built
+        _profile_ts = time.time()
+        logger.info("Profile built from DB queries (%d chars)", len(built))
+        _save_to_db(built)          # persist for future startups
+    except Exception as exc:
+        logger.warning("Profile build failed: %s", exc)
+    finally:
+        _is_building.clear()
+
+
+def load_profile_from_db_cache() -> bool:
+    """Try to load profile from persistent DB cache into memory.
+
+    Returns True if a valid cached profile was found and loaded.
+    Called at startup so the very first request is served instantly.
+    """
+    global _profile_cache, _profile_ts
+    _ensure_cache_table()
+    cached = _load_from_db()
+    if cached:
+        _profile_cache = cached
+        _profile_ts = time.time()
+        return True
+    return False
+
+
+def get_data_profile(force_refresh: bool = False) -> str:
+    """Return a formatted data profile string for prompt injection."""
+    # In-memory cache hit — fastest path
     if not force_refresh and _profile_cache and (time.time() - _profile_ts < _PROFILE_TTL):
         return _profile_cache
 
-    schema = get_schema()
-    profile_parts: list[str] = []
+    # Background build running — wait a moment then return whatever we have
+    if _is_building.is_set() and not force_refresh:
+        # Profile is being (re)built — return stale cache if available,
+        # otherwise fall through to build synchronously (should be rare)
+        if _profile_cache:
+            return _profile_cache
+        logger.info("Profile building in background — using static rules for this request")
+        return _generate_business_rules(get_schema())
 
-    engine = get_engine()
-    with engine.connect() as conn:
-        for table, columns in schema.items():
-            if table not in _KEY_TABLES:
-                continue
-            table_profile = _profile_table(conn, table, columns)
-            if table_profile:
-                profile_parts.append(table_profile)
-
-    # Auto-generate business rules
-    rules = _generate_business_rules(schema)
-    if rules:
-        profile_parts.append(rules)
-
-    _profile_cache = "\n".join(profile_parts)
-    _profile_ts = time.time()
-    return _profile_cache
+    # Nothing in memory — build now (only happens if startup load also failed)
+    _do_build()
+    return _profile_cache or _generate_business_rules(get_schema())
 
 
 def _profile_table(conn, table: str, columns: list[dict]) -> str:

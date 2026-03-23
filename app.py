@@ -19,21 +19,31 @@ app = FastAPI(title="AI SQL Analyst", version="1.0.0")
 def _warm_caches():
     """Pre-build schema, relationship, and data-profile caches at startup.
 
-    Runs in a background thread so the server starts instantly and the first
-    user request hits pre-warmed caches instead of waiting 60+ seconds.
+    Runs in a background thread so the server starts instantly.
+    Any request that arrives before the profile is ready gets the static
+    business rules immediately (non-blocking) and the full profile on the
+    next request.
     """
     try:
         logger.info("Cache warm-up — starting background pre-load...")
-        from db.schema import get_schema, format_schema
+        from db.schema import format_schema
         from db.relationships import format_relationships
-        from db.profiler import get_data_profile
+        import db.profiler as _profiler
 
         format_schema()
         logger.info("Cache warm-up — schema loaded")
         format_relationships()
         logger.info("Cache warm-up — relationships loaded")
-        get_data_profile()
-        logger.info("Cache warm-up — data profile loaded (all caches ready)")
+
+        # Try to load from persistent DB cache first (milliseconds)
+        loaded = _profiler.load_profile_from_db_cache()
+        if loaded:
+            logger.info("Cache warm-up — profile loaded from DB cache (instant)")
+        else:
+            # No DB cache yet (first ever deploy) — build from scratch
+            logger.info("Cache warm-up — no DB cache found, building profile...")
+            _profiler._do_build()
+            logger.info("Cache warm-up — profile built and saved to DB")
     except Exception as exc:
         logger.warning("Cache warm-up failed (non-fatal): %s", exc)
 
