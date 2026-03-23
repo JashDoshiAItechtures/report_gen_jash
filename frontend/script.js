@@ -20,6 +20,27 @@
     let selectedProvider = "groq";
     let isLoading        = false;
 
+    // ── Theme ──────────────────────────────────────────────────────────────
+    const themeSwitcher = document.getElementById("themeSwitcher");
+
+    function applyTheme(theme) {
+        document.documentElement.setAttribute("data-theme", theme);
+        localStorage.setItem("sqlbot_theme", theme);
+        themeSwitcher.querySelectorAll(".switcher-btn").forEach(b => {
+            b.classList.toggle("active", b.dataset.theme === theme);
+        });
+    }
+
+    // Apply saved or system preference on load
+    const savedTheme = localStorage.getItem("sqlbot_theme") ||
+        (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    applyTheme(savedTheme);
+
+    themeSwitcher.addEventListener("click", e => {
+        const btn = e.target.closest(".switcher-btn");
+        if (btn) applyTheme(btn.dataset.theme);
+    });
+
     // ── Conversation management ────────────────────────────────────────────
     // Each conversation: { id, title, created_at }
     function getConversations() {
