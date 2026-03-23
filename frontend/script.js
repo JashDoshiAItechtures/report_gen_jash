@@ -1,109 +1,87 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   AI SQL Analyst — Frontend Logic
+   AI SQL Analyst — Chat Interface
    ═══════════════════════════════════════════════════════════════════════════ */
 
 (function () {
     "use strict";
 
-    // ── DOM refs ──────────────────────────────────────────────────────────
-    const questionInput   = document.getElementById("questionInput");
-    const submitBtn       = document.getElementById("submitBtn");
-    const loadingIndicator= document.getElementById("loadingIndicator");
-    const resultsSection  = document.getElementById("resultsSection");
-    const errorSection    = document.getElementById("errorSection");
+    // ── DOM refs ───────────────────────────────────────────────────────────
+    const questionInput  = document.getElementById("questionInput");
+    const submitBtn      = document.getElementById("submitBtn");
+    const chatThread     = document.getElementById("chatThread");
+    const welcomeState   = document.getElementById("welcomeState");
+    const sidebar        = document.getElementById("sidebar");
+    const sidebarList    = document.getElementById("sidebarList");
+    const sidebarToggle  = document.getElementById("sidebarToggle");
+    const newChatBtn     = document.getElementById("newChatBtn");
+    const modelSwitcher  = document.getElementById("modelSwitcher");
+    const topbarTitle    = document.getElementById("topbarTitle");
 
-    const sqlOutput       = document.getElementById("sqlOutput");
-    const tableWrapper    = document.getElementById("tableWrapper");
-    const rowCount        = document.getElementById("rowCount");
-    const answerOutput    = document.getElementById("answerOutput");
-    const insightsOutput  = document.getElementById("insightsOutput");
-    const errorOutput     = document.getElementById("errorOutput");
-    const copySqlBtn      = document.getElementById("copySqlBtn");
+    let selectedProvider = "groq";
+    let isLoading        = false;
 
-    const modelSwitcher   = document.getElementById("modelSwitcher");
-
-    // ── Sidebar DOM refs ──────────────────────────────────────────────────
-    const sidebar         = document.getElementById("sidebar");
-    const sidebarList     = document.getElementById("sidebarList");
-    const sidebarToggle   = document.getElementById("sidebarToggle");
-    const newChatBtn      = document.getElementById("newChatBtn");
-
-    // ── Modal DOM refs ────────────────────────────────────────────────────
-    const historyModal    = document.getElementById("historyModal");
-    const modalBody       = document.getElementById("modalBody");
-    const modalTitle      = document.getElementById("modalTitle");
-    const modalClose      = document.getElementById("modalClose");
-
-    let selectedProvider  = "groq";
-    let loadingStepTimer  = null;
-
-    // Persistent conversation id per browser (for multi-turn memory)
-    let conversationId = window.localStorage.getItem("sqlbot_conversation_id");
-    if (!conversationId) {
-        if (window.crypto && window.crypto.randomUUID) {
-            conversationId = window.crypto.randomUUID();
-        } else {
-            conversationId = "conv-" + Date.now().toString(36);
-        }
-        window.localStorage.setItem("sqlbot_conversation_id", conversationId);
+    // ── Conversation management ────────────────────────────────────────────
+    // Each conversation: { id, title, created_at }
+    function getConversations() {
+        try { return JSON.parse(localStorage.getItem("sqlbot_conversations") || "[]"); }
+        catch { return []; }
+    }
+    function saveConversations(list) {
+        localStorage.setItem("sqlbot_conversations", JSON.stringify(list));
     }
 
-    // ── Sidebar toggle ───────────────────────────────────────────────────
+    let currentConvId = localStorage.getItem("sqlbot_conversation_id") || newConvId();
+
+    function newConvId() {
+        return (window.crypto && window.crypto.randomUUID)
+            ? window.crypto.randomUUID()
+            : "conv-" + Date.now().toString(36);
+    }
+
+    function setCurrentConv(id) {
+        currentConvId = id;
+        localStorage.setItem("sqlbot_conversation_id", id);
+    }
+
+    function addConversationToList(id, title) {
+        const list = getConversations();
+        if (!list.find(c => c.id === id)) {
+            list.unshift({ id, title, created_at: new Date().toISOString() });
+            saveConversations(list);
+        }
+        renderSidebarList();
+    }
+
+    function updateConversationTitle(id, title) {
+        const list = getConversations();
+        const conv = list.find(c => c.id === id);
+        if (conv && conv.title !== title) {
+            conv.title = title;
+            saveConversations(list);
+            renderSidebarList();
+        }
+    }
+
+    // ── Sidebar ────────────────────────────────────────────────────────────
     let sidebarOpen = true;
 
     function setSidebar(open) {
         sidebarOpen = open;
-        if (open) {
-            sidebar.classList.remove("collapsed");
-        } else {
-            sidebar.classList.add("collapsed");
-        }
+        sidebar.classList.toggle("collapsed", !open);
     }
 
     sidebarToggle.addEventListener("click", () => setSidebar(!sidebarOpen));
 
-    // ── New chat ─────────────────────────────────────────────────────────
-    newChatBtn.addEventListener("click", () => {
-        // Generate a brand-new conversation id and clear the UI
-        if (window.crypto && window.crypto.randomUUID) {
-            conversationId = window.crypto.randomUUID();
-        } else {
-            conversationId = "conv-" + Date.now().toString(36);
-        }
-        window.localStorage.setItem("sqlbot_conversation_id", conversationId);
-        hideResults();
-        hideError();
-        questionInput.value = "";
-        renderSidebar([]);
-        loadSidebarHistory();
-    });
-
-    // ── Sidebar history ───────────────────────────────────────────────────
-    async function loadSidebarHistory() {
-        try {
-            const res = await fetch(`/history?conversation_id=${encodeURIComponent(conversationId)}`);
-            if (!res.ok) return;
-            const turns = await res.json();
-            renderSidebar(turns);
-        } catch (_) { /* non-critical */ }
-    }
-
-    function renderSidebar(turns) {
-        if (!turns || turns.length === 0) {
-            sidebarList.innerHTML = '<p class="sidebar-empty">No history yet.</p>';
+    function renderSidebarList() {
+        const list = getConversations();
+        if (!list.length) {
+            sidebarList.innerHTML = '<p class="sidebar-empty">No conversations yet.</p>';
             return;
         }
         sidebarList.innerHTML = "";
-        // Most-recent first
-        [...turns].reverse().forEach((turn, idx) => {
+        list.forEach(conv => {
             const item = document.createElement("button");
-            item.className = "sidebar-item";
-            item.dataset.idx = idx;
-
-            const date = new Date(turn.created_at);
-            const timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-            const dateStr = date.toLocaleDateString([], { month: "short", day: "numeric" });
-
+            item.className = "sidebar-item" + (conv.id === currentConvId ? " active" : "");
             item.innerHTML = `
                 <div class="sidebar-item-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -111,115 +89,99 @@
                     </svg>
                 </div>
                 <div class="sidebar-item-content">
-                    <div class="sidebar-item-question">${escapeHtml(turn.question)}</div>
-                    <div class="sidebar-item-meta">${dateStr} · ${timeStr}</div>
+                    <div class="sidebar-item-question">${escapeHtml(conv.title || "New chat")}</div>
+                    <div class="sidebar-item-meta">${formatDate(conv.created_at)}</div>
                 </div>
-                <button class="sidebar-delete-btn" title="Delete" data-id="${turn.id}">
+                <button class="sidebar-delete-btn" title="Delete conversation" data-id="${conv.id}">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <polyline points="3 6 5 6 21 6"/>
                         <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
-                        <path d="M10 11v6M14 11v6"/>
-                        <path d="M9 6V4h6v2"/>
+                        <path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
                     </svg>
                 </button>
             `;
-            item.querySelector(".sidebar-item-icon, .sidebar-item-content")
-            item.addEventListener("click", (e) => {
+            item.addEventListener("click", e => {
                 if (e.target.closest(".sidebar-delete-btn")) return;
-                openHistoryModal(turn);
+                loadConversation(conv.id, conv.title);
             });
-            item.querySelector(".sidebar-delete-btn").addEventListener("click", async (e) => {
+            item.querySelector(".sidebar-delete-btn").addEventListener("click", async e => {
                 e.stopPropagation();
-                await deleteTurn(turn.id);
+                await deleteConversation(conv.id);
             });
             sidebarList.appendChild(item);
         });
     }
 
-    // ── Delete turn ──────────────────────────────────────────────────────
-    async function deleteTurn(turnId) {
+    async function deleteConversation(id) {
+        // Delete all turns for this conversation from DB
         try {
-            await fetch(`/history/${turnId}`, { method: "DELETE" });
-            loadSidebarHistory();
-        } catch (_) { /* non-critical */ }
-    }
+            const res = await fetch(`/history?conversation_id=${encodeURIComponent(id)}`);
+            if (res.ok) {
+                const turns = await res.json();
+                for (const t of turns) {
+                    await fetch(`/history/${t.id}`, { method: "DELETE" });
+                }
+            }
+        } catch (_) {}
 
-    // ── History modal ─────────────────────────────────────────────────────
-    function buildModalTable(rows) {
-        if (!rows || rows.length === 0) return '<p class="modal-no-data">No data returned.</p>';
-        const cols = Object.keys(rows[0]);
-        let html = '<div class="modal-table-wrapper"><table class="modal-table"><thead><tr>';
-        cols.forEach(c => { html += `<th>${escapeHtml(c)}</th>`; });
-        html += "</tr></thead><tbody>";
-        rows.forEach(row => {
-            html += "<tr>";
-            cols.forEach(c => {
-                const val = row[c];
-                html += `<td>${escapeHtml(val === null || val === undefined ? "NULL" : String(val))}</td>`;
-            });
-            html += "</tr>";
-        });
-        html += "</tbody></table></div>";
-        if (rows.length === 200) {
-            html += '<p class="modal-no-data" style="margin-top:0.5rem;">Showing first 200 rows.</p>';
+        // Remove from localStorage
+        const list = getConversations().filter(c => c.id !== id);
+        saveConversations(list);
+
+        // If we deleted the active one, start a new chat
+        if (id === currentConvId) {
+            startNewChat();
+        } else {
+            renderSidebarList();
         }
-        return html;
     }
 
-    function openHistoryModal(turn) {
-        modalTitle.textContent = turn.question.length > 60
-            ? turn.question.slice(0, 60) + "…"
-            : turn.question;
+    async function loadConversation(id, title) {
+        setCurrentConv(id);
+        topbarTitle.textContent = title || "Chat";
+        clearChatThread();
 
-        const date = new Date(turn.created_at);
-        const timeStr = date.toLocaleString();
+        try {
+            const res = await fetch(`/history?conversation_id=${encodeURIComponent(id)}`);
+            if (!res.ok) return;
+            const turns = await res.json();
+            if (turns.length > 0) {
+                hideWelcome();
+                turns.forEach(t => appendTurn(t.question, t.answer, t.sql_query, t.query_result));
+            } else {
+                showWelcome();
+            }
+        } catch (_) { showWelcome(); }
 
-        const rowCount = turn.query_result ? turn.query_result.length : 0;
-        const rowLabel = rowCount === 1 ? "1 row" : `${rowCount} rows`;
-
-        modalBody.innerHTML = `
-            <div class="modal-section">
-                <span class="modal-section-label">Question</span>
-                <div class="modal-section-content">${escapeHtml(turn.question)}</div>
-            </div>
-            ${turn.sql_query ? `
-            <div class="modal-section">
-                <span class="modal-section-label">Generated SQL</span>
-                <div class="modal-section-content modal-sql">${escapeHtml(turn.sql_query)}</div>
-            </div>` : ""}
-            <div class="modal-section">
-                <span class="modal-section-label">Query Result${turn.query_result ? ` · ${rowLabel}` : ""}</span>
-                ${buildModalTable(turn.query_result)}
-            </div>
-            <div class="modal-section">
-                <span class="modal-section-label">AI Explanation</span>
-                <div class="modal-section-content">${escapeHtml(turn.answer)}</div>
-            </div>
-            <div class="modal-time">${timeStr}</div>
-        `;
-
-        historyModal.classList.remove("hidden");
-        document.body.style.overflow = "hidden";
+        renderSidebarList();
+        scrollToBottom();
     }
 
-    function closeModal() {
-        historyModal.classList.add("hidden");
-        document.body.style.overflow = "";
+    // ── New Chat ───────────────────────────────────────────────────────────
+    newChatBtn.addEventListener("click", startNewChat);
+
+    function startNewChat() {
+        const id = newConvId();
+        setCurrentConv(id);
+        topbarTitle.textContent = "New Chat";
+        clearChatThread();
+        showWelcome();
+        questionInput.value = "";
+        questionInput.style.height = "";
+        renderSidebarList();
     }
 
-    modalClose.addEventListener("click", closeModal);
-    historyModal.addEventListener("click", (e) => {
-        if (e.target === historyModal) closeModal();
-    });
-    document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") closeModal();
+    // ── Welcome chips ──────────────────────────────────────────────────────
+    document.querySelectorAll(".chip").forEach(chip => {
+        chip.addEventListener("click", () => {
+            questionInput.value = chip.dataset.q;
+            questionInput.dispatchEvent(new Event("input"));
+            handleSubmit();
+        });
     });
 
-    // Load sidebar on startup
-    loadSidebarHistory();
-
-    // ── Model Switcher ───────────────────────────────────────────────────
-    modelSwitcher.addEventListener("click", (e) => {
+    // ── Model switcher ─────────────────────────────────────────────────────
+    modelSwitcher.addEventListener("click", e => {
         const btn = e.target.closest(".switcher-btn");
         if (!btn) return;
         modelSwitcher.querySelectorAll(".switcher-btn").forEach(b => b.classList.remove("active"));
@@ -227,9 +189,15 @@
         selectedProvider = btn.dataset.provider;
     });
 
-    // ── Submit ────────────────────────────────────────────────────────────
+    // ── Auto-resize textarea ───────────────────────────────────────────────
+    questionInput.addEventListener("input", () => {
+        questionInput.style.height = "auto";
+        questionInput.style.height = Math.min(questionInput.scrollHeight, 160) + "px";
+    });
+
+    // ── Submit ─────────────────────────────────────────────────────────────
     submitBtn.addEventListener("click", handleSubmit);
-    questionInput.addEventListener("keydown", (e) => {
+    questionInput.addEventListener("keydown", e => {
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             handleSubmit();
@@ -238,11 +206,21 @@
 
     async function handleSubmit() {
         const question = questionInput.value.trim();
-        if (!question) return;
+        if (!question || isLoading) return;
 
-        showLoading();
-        hideResults();
-        hideError();
+        isLoading = true;
+        submitBtn.disabled = true;
+
+        // Hide welcome, show user message immediately
+        hideWelcome();
+        appendUserMessage(question);
+        questionInput.value = "";
+        questionInput.style.height = "";
+        scrollToBottom();
+
+        // Show typing indicator
+        const typingEl = appendTypingIndicator();
+        scrollToBottom();
 
         try {
             const res = await fetch("/chat", {
@@ -251,119 +229,239 @@
                 body: JSON.stringify({
                     question,
                     provider: selectedProvider,
-                    conversation_id: conversationId,
+                    conversation_id: currentConvId,
                 }),
             });
 
+            typingEl.remove();
+
             if (!res.ok) {
                 const err = await res.json().catch(() => ({ detail: res.statusText }));
-                throw new Error(err.detail || `HTTP ${res.status}`);
+                appendErrorMessage(err.detail || `HTTP ${res.status}`);
+            } else {
+                const data = await res.json();
+                appendAIMessage(data);
+
+                // Update sidebar: first question becomes the conversation title
+                const convs = getConversations();
+                if (!convs.find(c => c.id === currentConvId)) {
+                    addConversationToList(currentConvId, question);
+                    topbarTitle.textContent = question.length > 40 ? question.slice(0, 40) + "…" : question;
+                }
+            }
+        } catch (err) {
+            typingEl.remove();
+            appendErrorMessage(err.message || "Something went wrong. Please try again.");
+        }
+
+        isLoading = false;
+        submitBtn.disabled = false;
+        scrollToBottom();
+    }
+
+    // ── Chat rendering helpers ─────────────────────────────────────────────
+
+    function appendUserMessage(text) {
+        const el = document.createElement("div");
+        el.className = "msg msg-user";
+        el.innerHTML = `<div class="msg-bubble">${escapeHtml(text)}</div>`;
+        chatThread.appendChild(el);
+    }
+
+    function appendTypingIndicator() {
+        const el = document.createElement("div");
+        el.className = "msg msg-ai";
+        el.innerHTML = `
+            <div class="ai-avatar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                    <path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+                </svg>
+            </div>
+            <div class="typing-indicator">
+                <span></span><span></span><span></span>
+            </div>`;
+        chatThread.appendChild(el);
+        return el;
+    }
+
+    function appendAIMessage(data) {
+        const el = document.createElement("div");
+        el.className = "msg msg-ai";
+
+        const hasData   = data.data && data.data.length > 0;
+        const hasSql    = !!data.sql;
+        const hasAnswer = !!data.answer;
+        const rowLabel  = hasData ? `${data.data.length} row${data.data.length !== 1 ? "s" : ""}` : "0 rows";
+
+        el.innerHTML = `
+            <div class="ai-avatar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                    <path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+                </svg>
+            </div>
+            <div class="ai-body">
+                ${hasAnswer ? `<div class="ai-answer">${escapeHtml(data.answer)}</div>` : ""}
+                ${hasSql ? `
+                <div class="ai-section">
+                    <button class="section-toggle" data-target="sql-${Date.now()}">
+                        <span class="section-toggle-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                        </span>
+                        SQL Query
+                        <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="section-body" id="sql-${Date.now()}">
+                        <pre class="sql-code"><code>${escapeHtml(data.sql)}</code></pre>
+                    </div>
+                </div>` : ""}
+                ${hasData ? `
+                <div class="ai-section">
+                    <button class="section-toggle" data-target="tbl-${Date.now()}">
+                        <span class="section-toggle-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                        </span>
+                        Results <span class="row-badge">${rowLabel}</span>
+                        <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="section-body" id="tbl-${Date.now()}">
+                        <div class="table-wrapper">${buildTable(data.data)}</div>
+                    </div>
+                </div>` : ""}
+                ${data.insights ? `
+                <div class="ai-section">
+                    <button class="section-toggle" data-target="ins-${Date.now()}">
+                        <span class="section-toggle-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 017 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 01-1 1H9a1 1 0 01-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 017-7z"/><line x1="9" y1="21" x2="15" y2="21"/></svg>
+                        </span>
+                        Insights
+                        <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="section-body" id="ins-${Date.now()}">
+                        <div class="insights-text">${escapeHtml(data.insights)}</div>
+                    </div>
+                </div>` : ""}
+            </div>`;
+
+        // Wire up section toggles
+        // SQL and Results are open by default; Insights is collapsed
+        el.querySelectorAll(".section-toggle").forEach(btn => {
+            const targetId = btn.dataset.target;
+            const body = el.querySelector(`#${targetId}`);
+            if (!body) return;
+
+            const isInsights = targetId.startsWith("ins-");
+            if (isInsights) {
+                body.classList.add("collapsed");
+            } else {
+                btn.classList.add("open"); // chevron rotated = open
             }
 
-            const data = await res.json();
-            renderResults(data);
-            loadSidebarHistory();   // refresh sidebar after each answer
-        } catch (err) {
-            showError(err.message || "Something went wrong. Please try again.");
-        } finally {
-            hideLoading();
-        }
+            btn.addEventListener("click", () => {
+                body.classList.toggle("collapsed");
+                btn.classList.toggle("open");
+            });
+        });
+
+        chatThread.appendChild(el);
     }
 
-    // ── Render Results ───────────────────────────────────────────────────
-    function renderResults(data) {
-        // SQL
-        sqlOutput.textContent = data.sql || "(no SQL generated)";
-
-        // Data table
-        if (data.data && data.data.length > 0) {
-            rowCount.textContent = `${data.data.length} row${data.data.length !== 1 ? "s" : ""}`;
-            tableWrapper.innerHTML = buildTable(data.data);
-        } else {
-            rowCount.textContent = "0 rows";
-            tableWrapper.innerHTML = '<p style="padding:1rem;color:var(--text-muted);">No data returned.</p>';
-        }
-
-        // Answer
-        answerOutput.textContent = data.answer || "";
-
-        // Insights
-        insightsOutput.textContent = data.insights || "";
-
-        resultsSection.classList.remove("hidden");
+    function appendErrorMessage(msg) {
+        const el = document.createElement("div");
+        el.className = "msg msg-ai";
+        el.innerHTML = `
+            <div class="ai-avatar ai-avatar-error">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+                </svg>
+            </div>
+            <div class="ai-body">
+                <div class="ai-error">${escapeHtml(msg)}</div>
+            </div>`;
+        chatThread.appendChild(el);
     }
 
+    function appendTurn(question, answer, sql, queryResult) {
+        appendUserMessage(question);
+        appendAIMessage({
+            answer,
+            sql: sql || "",
+            data: queryResult || [],
+            insights: "",
+        });
+    }
+
+    // ── Table builder ──────────────────────────────────────────────────────
     function buildTable(rows) {
-        if (!rows.length) return "";
+        if (!rows || !rows.length) return '<p class="no-data">No data returned.</p>';
         const cols = Object.keys(rows[0]);
-        // Limit display to 200 rows
-        const displayRows = rows.slice(0, 200);
+        const display = rows.slice(0, 200);
         let html = "<table><thead><tr>";
         cols.forEach(c => { html += `<th>${escapeHtml(c)}</th>`; });
         html += "</tr></thead><tbody>";
-        displayRows.forEach(row => {
+        display.forEach(row => {
             html += "<tr>";
             cols.forEach(c => {
-                const val = row[c];
-                html += `<td>${escapeHtml(val === null ? "NULL" : String(val))}</td>`;
+                const v = row[c];
+                html += `<td>${escapeHtml(v === null || v === undefined ? "NULL" : String(v))}</td>`;
             });
             html += "</tr>";
         });
         html += "</tbody></table>";
         if (rows.length > 200) {
-            html += `<p style="padding:0.75rem 1rem;color:var(--text-muted);font-size:0.8rem;">Showing 200 of ${rows.length} rows</p>`;
+            html += `<p class="no-data">Showing 200 of ${rows.length} rows</p>`;
         }
         return html;
     }
 
-    // ── Copy SQL ─────────────────────────────────────────────────────────
-    copySqlBtn.addEventListener("click", () => {
-        const sql = sqlOutput.textContent;
-        navigator.clipboard.writeText(sql).then(() => {
-            copySqlBtn.style.color = "var(--accent-emerald)";
-            setTimeout(() => { copySqlBtn.style.color = ""; }, 1200);
-        });
-    });
-
-    // ── Loading animation ────────────────────────────────────────────────
-    function showLoading() {
-        loadingIndicator.classList.remove("hidden");
-        submitBtn.disabled = true;
-        animateLoadingSteps();
+    // ── Helpers ────────────────────────────────────────────────────────────
+    function showWelcome()  { welcomeState.classList.remove("hidden"); }
+    function hideWelcome()  { welcomeState.classList.add("hidden"); }
+    function clearChatThread() {
+        // Remove all msg elements, keep welcome state
+        chatThread.querySelectorAll(".msg").forEach(e => e.remove());
     }
-
-    function hideLoading() {
-        loadingIndicator.classList.add("hidden");
-        submitBtn.disabled = false;
-        if (loadingStepTimer) clearInterval(loadingStepTimer);
+    function scrollToBottom() {
+        chatThread.scrollTop = chatThread.scrollHeight;
     }
-
-    function animateLoadingSteps() {
-        const steps = loadingIndicator.querySelectorAll(".step");
-        let idx = 0;
-        steps.forEach(s => s.classList.remove("active"));
-        if (steps.length) steps[0].classList.add("active");
-
-        loadingStepTimer = setInterval(() => {
-            steps.forEach(s => s.classList.remove("active"));
-            idx = (idx + 1) % steps.length;
-            steps[idx].classList.add("active");
-        }, 2000);
+    function formatDate(iso) {
+        if (!iso) return "";
+        const d = new Date(iso);
+        const now = new Date();
+        if (d.toDateString() === now.toDateString()) {
+            return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        }
+        return d.toLocaleDateString([], { month: "short", day: "numeric" });
     }
-
-    // ── Visibility helpers ───────────────────────────────────────────────
-    function hideResults() { resultsSection.classList.add("hidden"); }
-    function hideError()   { errorSection.classList.add("hidden"); }
-
-    function showError(msg) {
-        errorOutput.textContent = msg;
-        errorSection.classList.remove("hidden");
-    }
-
-    // ── Escape HTML ──────────────────────────────────────────────────────
     function escapeHtml(str) {
-        const div = document.createElement("div");
-        div.appendChild(document.createTextNode(str));
-        return div.innerHTML;
+        const d = document.createElement("div");
+        d.appendChild(document.createTextNode(String(str)));
+        return d.innerHTML;
     }
+
+    // ── Startup: load current conversation ────────────────────────────────
+    (async function init() {
+        renderSidebarList();
+        const convs = getConversations();
+        const existing = convs.find(c => c.id === currentConvId);
+
+        if (existing) {
+            topbarTitle.textContent = existing.title || "Chat";
+            try {
+                const res = await fetch(`/history?conversation_id=${encodeURIComponent(currentConvId)}`);
+                if (res.ok) {
+                    const turns = await res.json();
+                    if (turns.length > 0) {
+                        hideWelcome();
+                        turns.forEach(t => appendTurn(t.question, t.answer, t.sql_query, t.query_result));
+                        scrollToBottom();
+                    }
+                }
+            } catch (_) {}
+        } else {
+            showWelcome();
+        }
+    })();
+
 })();
