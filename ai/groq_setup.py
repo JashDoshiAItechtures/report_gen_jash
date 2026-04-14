@@ -14,7 +14,8 @@ def _configure_default_lm() -> dspy.LM:
         model=f"groq/{config.GROQ_MODEL}",
         api_key=config.GROQ_API_KEY,
         max_tokens=4096,
-        temperature=0.2,
+        temperature=0,
+        seed=42,
     )
     dspy.configure(lm=lm)
     return lm

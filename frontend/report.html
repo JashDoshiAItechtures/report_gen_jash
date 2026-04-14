@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Analytics Report — AI SQL Analyst</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/style.css?v=20260408" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <style>
+        /* ── Report Page Layout ──────────────────────────────── */
+        body { overflow: auto; height: auto; min-height: 100vh; }
+        .report-page { min-height: 100vh; display: flex; flex-direction: column; }
+        .report-page .report-topbar { position: sticky; top: 0; z-index: 50; }
+        .report-page .report-content { flex: 1; overflow: visible; padding: 1.25rem 1.5rem 2.5rem; }
+
+        /* ── Filter Bar — Premium Pill Design ───────────────── */
+        .report-filter-bar {
+            max-width: 1400px; margin: 0 auto 1.25rem; padding: 0.65rem 1rem;
+            background: var(--bg-card); border: 1px solid var(--border-subtle);
+            border-radius: 14px; display: flex; flex-wrap: wrap;
+            align-items: center; gap: 0.6rem;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        }
+        .filter-group {
+            display: flex; align-items: center; gap: 0.35rem;
+            background: var(--bg-main); padding: 0.25rem 0.55rem;
+            border-radius: 8px; border: 1px solid var(--border-subtle);
+        }
+        .filter-label {
+            font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.06em; color: var(--accent-blue); white-space: nowrap;
+        }
+        .filter-select, .filter-input {
+            font-family: 'Inter', sans-serif; font-size: 0.72rem; font-weight: 500;
+            padding: 0.25rem 0.4rem; border-radius: 6px;
+            border: none; background: transparent;
+            color: var(--text-primary); outline: none; min-width: 75px;
+        }
+        .filter-select:focus, .filter-input:focus { outline: 2px solid var(--accent-blue); outline-offset: 1px; }
+        .filter-input[type="date"] { width: 110px; }
+        .filter-apply-btn {
+            font-family: 'Inter', sans-serif; font-size: 0.68rem; font-weight: 700;
+            padding: 0.4rem 1rem; border-radius: 8px; border: none; cursor: pointer;
+            background: var(--gradient-primary); color: white;
+            transition: all 0.2s; display: flex; align-items: center;
+            box-shadow: 0 2px 8px rgba(99,102,241,0.25);
+        }
+        .filter-apply-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(99,102,241,0.35); }
+        .filter-clear-btn {
+            font-family: 'Inter', sans-serif; font-size: 0.68rem; font-weight: 600;
+            padding: 0.4rem 0.85rem; border-radius: 8px; cursor: pointer;
+            background: transparent; border: 1px solid var(--border-subtle);
+            color: var(--text-muted); transition: all 0.2s;
+        }
+        .filter-clear-btn:hover { border-color: var(--accent-rose); color: var(--accent-rose); }
+        .filter-divider { width: 1px; height: 22px; background: var(--border-subtle); margin: 0 0.15rem; }
+
+        /* ── Report Meta ─────────────────────────────────────── */
+        .report-meta-bar {
+            max-width: 1400px; margin: 0 auto 0.75rem;
+            display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+        }
+        .report-meta-tag {
+            display: flex; align-items: center; gap: 0.25rem;
+            font-size: 0.62rem; font-weight: 500; color: var(--text-muted);
+            padding: 0.2rem 0.55rem; background: var(--bg-card);
+            border: 1px solid var(--border-subtle); border-radius: 20px;
+        }
+        .report-meta-tag svg { width: 10px; height: 10px; }
+
+        /* ── Summary — Premium ───────────────────────────────── */
+        .report-summary {
+            max-width: 1400px; margin: 0 auto 1.25rem;
+            padding: 1rem 1.25rem; border-radius: 14px;
+            background: linear-gradient(135deg, rgba(99,102,241,0.06), rgba(59,130,246,0.04));
+            border: 1px solid rgba(99,102,241,0.12);
+            border-left: 4px solid var(--accent-indigo);
+        }
+        .report-summary-text { font-size: 0.8rem; line-height: 1.7; color: var(--text-secondary); }
+
+        /* ── Section Labels ──────────────────────────────────── */
+        .report-section-label {
+            max-width: 1400px; margin: 1rem auto 0.6rem;
+            display: flex; align-items: center; gap: 0.45rem; padding: 0 0.15rem;
+        }
+        .report-section-label-icon {
+            width: 24px; height: 24px; border-radius: 7px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .report-section-label-icon svg { width: 13px; height: 13px; }
+        .report-section-label-text {
+            font-size: 0.7rem; font-weight: 800; text-transform: uppercase;
+            letter-spacing: 0.07em; color: var(--text-muted);
+        }
+        .label-kpi .report-section-label-icon { background: rgba(16,185,129,0.1); color: #10b981; }
+        .label-charts .report-section-label-icon { background: rgba(99,102,241,0.1); color: #6366f1; }
+        .label-table .report-section-label-icon { background: rgba(59,130,246,0.1); color: #3b82f6; }
+        .label-insights .report-section-label-icon { background: rgba(245,158,11,0.1); color: #f59e0b; }
+
+        /* ── KPI Grid — Premium ──────────────────────────────── */
+        .kpi-grid {
+            max-width: 1400px; margin: 0 auto 1rem;
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0.75rem;
+        }
+        .kpi-card {
+            background: var(--bg-card); border: 1px solid var(--border-subtle);
+            border-radius: 14px; padding: 0.85rem 1rem; position: relative;
+            overflow: hidden; transition: transform 0.25s ease, box-shadow 0.25s ease;
+        }
+        .kpi-card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,0.08); }
+        .kpi-card::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+        }
+        .kpi-card:nth-child(1)::before { background: linear-gradient(90deg, #10b981, #34d399); }
+        .kpi-card:nth-child(2)::before { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
+        .kpi-card:nth-child(3)::before { background: linear-gradient(90deg, #8b5cf6, #a78bfa); }
+        .kpi-card:nth-child(4)::before { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+        .kpi-card:nth-child(5)::before { background: linear-gradient(90deg, #f43f5e, #fb7185); }
+        .kpi-card:nth-child(6)::before { background: linear-gradient(90deg, #06b6d4, #22d3ee); }
+        .kpi-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.4rem; }
+        .kpi-label { font-size: 0.64rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); line-height: 1.3; }
+        .kpi-value { font-size: 1.3rem; font-weight: 800; color: var(--text-primary); line-height: 1.2; letter-spacing: -0.02em; }
+        .kpi-eye-btn {
+            width: 22px; height: 22px; border: none; background: rgba(99,102,241,0.06); cursor: pointer;
+            color: var(--text-muted); opacity: 0.6; transition: all 0.2s; flex-shrink: 0; border-radius: 6px;
+        }
+        .kpi-eye-btn:hover { opacity: 1; background: rgba(99,102,241,0.12); color: var(--accent-indigo); }
+        .kpi-eye-btn svg { width: 14px; height: 14px; }
+
+        /* ── Charts Grid — Premium ────────────────────────────── */
+        .charts-grid {
+            max-width: 1400px; margin: 0 auto 1rem;
+            display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem;
+        }
+        .charts-grid .chart-card:last-child:nth-child(odd) {
+            grid-column: 1 / -1;
+        }
+        .chart-card {
+            background: var(--bg-card); border: 1px solid var(--border-subtle);
+            border-radius: 14px; padding: 0.85rem; transition: all 0.25s ease;
+        }
+        .chart-card:hover { box-shadow: 0 8px 24px rgba(0,0,0,0.06); }
+        .chart-full-width { grid-column: 1 / -1; }
+        .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }
+        .chart-title { font-size: 0.76rem; font-weight: 700; color: var(--text-primary); }
+        .chart-body { position: relative; height: 240px; }
+        .chart-error {
+            display: flex; align-items: center; justify-content: center; height: 100%;
+            font-size: 0.72rem; color: var(--accent-rose); text-align: center; padding: 0.5rem;
+        }
+
+        /* ── Data Table — Premium ─────────────────────────────── */
+        .report-table-section {
+            max-width: 1400px; margin: 0 auto 1rem;
+            background: var(--bg-card); border: 1px solid var(--border-subtle);
+            border-radius: 14px; overflow: hidden;
+        }
+        .report-table-header {
+            display: flex; align-items: center; gap: 0.5rem;
+            padding: 0.65rem 1rem; border-bottom: 1px solid var(--border-subtle);
+            background: linear-gradient(135deg, rgba(59,130,246,0.04), rgba(99,102,241,0.04));
+        }
+        .report-table-title { font-size: 0.78rem; font-weight: 700; color: var(--text-primary); flex: 1; }
+        .row-badge {
+            font-size: 0.6rem; font-weight: 700; padding: 0.18rem 0.45rem;
+            border-radius: 6px; background: rgba(59,130,246,0.1); color: var(--accent-blue);
+        }
+        .report-table-body { overflow-x: auto; max-height: 420px; overflow-y: auto; }
+        .report-table-body table { width: 100%; border-collapse: collapse; font-size: 0.72rem; }
+        .report-table-body th {
+            padding: 0.5rem 0.7rem; text-align: left; font-weight: 800;
+            text-transform: uppercase; font-size: 0.6rem; letter-spacing: 0.05em;
+            color: var(--accent-indigo); border-bottom: 2px solid var(--border-subtle);
+            background: var(--bg-card);
+            position: sticky; top: 0; z-index: 2;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.06);
+        }
+        .report-table-body td {
+            padding: 0.45rem 0.7rem; border-bottom: 1px solid var(--border-subtle);
+            color: var(--text-secondary);
+        }
+        .report-table-body tr:nth-child(even) td { background: rgba(99,102,241,0.015); }
+        .report-table-body tr:hover td { background: rgba(99,102,241,0.05); }
+
+        /* ── Insights — Premium Cards ────────────────────────── */
+        .report-insights {
+            max-width: 1400px; margin: 0 auto 1rem;
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0.65rem;
+        }
+        .insight-card {
+            background: var(--bg-card); border: 1px solid var(--border-subtle);
+            border-radius: 14px; padding: 0.8rem 1rem;
+            border-left: 4px solid transparent; transition: all 0.25s ease;
+        }
+        .insight-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.06); }
+        .insight-card.type-positive { border-left-color: #10b981; }
+        .insight-card.type-negative, .insight-card.type-warning { border-left-color: #f43f5e; }
+        .insight-card.type-neutral { border-left-color: #3b82f6; }
+        .insight-card.type-opportunity { border-left-color: #f59e0b; }
+        .insight-title { font-size: 0.76rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.25rem; }
+        .insight-body { font-size: 0.7rem; line-height: 1.6; color: var(--text-secondary); }
+        .insight-type-badge {
+            display: inline-block; font-size: 0.55rem; font-weight: 800; text-transform: uppercase;
+            letter-spacing: 0.05em; padding: 0.12rem 0.4rem; border-radius: 4px; margin-bottom: 0.3rem;
+        }
+        .badge-positive { background: rgba(16,185,129,0.1); color: #10b981; }
+        .badge-negative, .badge-warning { background: rgba(244,63,94,0.1); color: #f43f5e; }
+        .badge-neutral { background: rgba(59,130,246,0.1); color: #3b82f6; }
+        .badge-opportunity { background: rgba(245,158,11,0.1); color: #f59e0b; }
+
+        /* ── Streaming Animation ──────────────────────────────── */
+        .stream-section { opacity: 0; transform: translateY(16px); transition: all 0.5s ease; }
+        .stream-section.visible { opacity: 1; transform: translateY(0); }
+
+        /* ── Responsive ──────────────────────────────────────── */
+        @media (max-width: 768px) {
+            .charts-grid { grid-template-columns: 1fr; }
+            .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+            .report-insights { grid-template-columns: 1fr; }
+            .report-filter-bar { gap: 0.4rem; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="bg-effects">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+</div>
+
+<div class="report-page">
+    <!-- Report Top Bar -->
+    <div class="report-topbar">
+        <button class="report-back-btn" id="reportBackBtn" title="Close" onclick="window.close()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="15 18 9 12 15 6"/>
+            </svg>
+            Close Report
+        </button>
+        <span class="report-title" id="reportTitle">Analytics Report</span>
+        <button class="report-thought-btn" id="reportThoughtBtn" title="View AI Reasoning">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+            </svg>
+            AI Reasoning
+        </button>
+    </div>
+
+    <!-- Report Content -->
+    <div class="report-content" id="reportContent">
+        <div class="report-loading" id="reportLoading">
+            <div class="report-loading-spinner"></div>
+            <div class="report-loading-text">Loading report...</div>
+        </div>
+    </div>
+</div>
+
+<!-- Explanation Modal -->
+<div class="explain-modal-overlay hidden" id="explainModalOverlay">
+    <div class="explain-modal glass" id="explainModal">
+        <button class="explain-modal-close" id="explainModalClose">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+        </button>
+        <h3 id="explainModalTitle">Explanation</h3>
+        <div id="explainModalBody"></div>
+    </div>
+</div>
+
+<!-- Thought Process Modal -->
+<div class="explain-modal-overlay hidden" id="thoughtModalOverlay">
+    <div class="explain-modal explain-modal-wide glass" id="thoughtModal">
+        <button class="explain-modal-close" id="thoughtModalClose">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+        </button>
+        <h3>AI Reasoning Process</h3>
+        <div id="thoughtModalBody"></div>
+    </div>
+</div>
+
+<script src="/static/report.js?v=20260410"></script>
+</body>
+</html>

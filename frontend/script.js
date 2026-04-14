@@ -15,10 +15,60 @@
     const sidebarToggle  = document.getElementById("sidebarToggle");
     const newChatBtn     = document.getElementById("newChatBtn");
     const modelSwitcher  = document.getElementById("modelSwitcher");
+    const modeSwitcher    = document.getElementById("modeSwitcher");
+    const welcomeChips   = document.getElementById("welcomeChips");
+    const welcomeChipsReport = document.getElementById("welcomeChipsReport");
     const topbarTitle    = document.getElementById("topbarTitle");
 
     let selectedProvider = "groq";
     let isLoading        = false;
+    let currentMode      = "chat"; // "chat" | "report"
+
+    // ── Report modification state ─────────────────────────────────────
+    let latestReportData = null;   // Latest report JSON for modifications
+    let latestReportId   = null;   // sessionStorage key for the report
+    let reportWindow     = null;   // Reference to the report tab
+
+    // ── Modification Detection ───────────────────────────────────────
+    function isModificationCommand(text) {
+        const q = text.toLowerCase().trim();
+        const modKeywords = [
+            "change", "replace", "swap", "switch", "modify", "update", "edit",
+            "add a kpi", "add kpi", "add a chart", "add chart", "add one more",
+            "remove the", "remove kpi", "remove chart", "delete the", "delete kpi",
+            "rename", "make it", "convert to", "convert the", "turn into",
+            "to a bar", "to bar", "to a pie", "to pie", "to a line", "to line",
+            "to doughnut", "to a doughnut", "to area", "to horizontal",
+            "instead of", "more kpi", "another kpi", "another chart",
+            "change color", "change the color", "update the title",
+        ];
+        return modKeywords.some(kw => q.includes(kw));
+    }
+
+    // ── Strip executed data from report before sending to LLM ────────
+    function stripReportData(report) {
+        const clean = JSON.parse(JSON.stringify(report)); // deep clone
+        // Strip KPI values (LLM only needs SQL + structure)
+        if (clean.kpis) {
+            clean.kpis.forEach(kpi => {
+                delete kpi.value;
+                delete kpi.error;
+            });
+        }
+        // Strip chart data (LLM only needs SQL + type + config)
+        if (clean.charts) {
+            clean.charts.forEach(chart => {
+                delete chart.data;
+                delete chart.error;
+            });
+        }
+        // Strip table data
+        if (clean.table) {
+            delete clean.table.data;
+            delete clean.table.error;
+        }
+        return clean;
+    }
 
     // ── Theme ──────────────────────────────────────────────────────────────
     const themeSwitcher = document.getElementById("themeSwitcher");
@@ -42,16 +92,25 @@
     });
 
     // ── Conversation management ────────────────────────────────────────────
-    // Each conversation: { id, title, created_at }
-    function getConversations() {
+    // Each conversation: { id, title, created_at, mode }
+    function getAllConversations() {
         try { return JSON.parse(localStorage.getItem("sqlbot_conversations") || "[]"); }
         catch { return []; }
+    }
+    function getConversations() {
+        // Return only conversations for the current mode
+        return getAllConversations().filter(c => (c.mode || "chat") === currentMode);
     }
     function saveConversations(list) {
         localStorage.setItem("sqlbot_conversations", JSON.stringify(list));
     }
 
-    let currentConvId = localStorage.getItem("sqlbot_conversation_id") || newConvId();
+    // ── Per-mode conversation IDs (chat and report are fully separate) ────
+    function convStorageKey(mode) {
+        return "sqlbot_conversation_id_" + (mode || currentMode);
+    }
+
+    let currentConvId = localStorage.getItem(convStorageKey("chat")) || newConvId();
 
     function newConvId() {
         return (window.crypto && window.crypto.randomUUID)
@@ -61,20 +120,20 @@
 
     function setCurrentConv(id) {
         currentConvId = id;
-        localStorage.setItem("sqlbot_conversation_id", id);
+        localStorage.setItem(convStorageKey(currentMode), id);
     }
 
     function addConversationToList(id, title) {
-        const list = getConversations();
+        const list = getAllConversations();
         if (!list.find(c => c.id === id)) {
-            list.unshift({ id, title, created_at: new Date().toISOString() });
+            list.unshift({ id, title, created_at: new Date().toISOString(), mode: currentMode });
             saveConversations(list);
         }
         renderSidebarList();
     }
 
     function updateConversationTitle(id, title) {
-        const list = getConversations();
+        const list = getAllConversations();
         const conv = list.find(c => c.id === id);
         if (conv && conv.title !== title) {
             conv.title = title;
@@ -146,7 +205,7 @@
         } catch (_) {}
 
         // Remove from localStorage
-        const list = getConversations().filter(c => c.id !== id);
+        const list = getAllConversations().filter(c => c.id !== id);
         saveConversations(list);
 
         // If we deleted the active one, start a new chat
@@ -190,11 +249,36 @@
         questionInput.value = "";
         questionInput.style.height = "";
         renderSidebarList();
+        // Clear report modification state
+        latestReportData = null;
+        latestReportId = null;
     }
 
     // ── Welcome chips ──────────────────────────────────────────────────────
     document.querySelectorAll(".chip").forEach(chip => {
         chip.addEventListener("click", () => {
+            // Auto-switch mode based on chip type
+            const isReport = chip.classList.contains("chip-report");
+            if (isReport && currentMode !== "report") {
+                currentMode = "report";
+                if (modeSwitcher) {
+                    modeSwitcher.querySelectorAll(".switcher-btn").forEach(b => b.classList.toggle("active", b.dataset.mode === "report"));
+                }
+                questionInput.placeholder = "Describe the report you want...";
+                // Ensure per-mode conversation is set
+                if (!localStorage.getItem(convStorageKey("report"))) {
+                    setCurrentConv(newConvId());
+                }
+            } else if (!isReport && currentMode !== "chat") {
+                currentMode = "chat";
+                if (modeSwitcher) {
+                    modeSwitcher.querySelectorAll(".switcher-btn").forEach(b => b.classList.toggle("active", b.dataset.mode === "chat"));
+                }
+                questionInput.placeholder = "Ask a question about your data...";
+                if (!localStorage.getItem(convStorageKey("chat"))) {
+                    setCurrentConv(newConvId());
+                }
+            }
             questionInput.value = chip.dataset.q;
             questionInput.dispatchEvent(new Event("input"));
             handleSubmit();
@@ -209,6 +293,48 @@
         btn.classList.add("active");
         selectedProvider = btn.dataset.provider;
     });
+
+    // ── Mode switcher ──────────────────────────────────────────────────────
+
+    if (modeSwitcher) {
+        modeSwitcher.addEventListener("click", e => {
+            const btn = e.target.closest(".switcher-btn");
+            if (!btn) return;
+            const newMode = btn.dataset.mode;
+            if (newMode === currentMode) return; // no change
+
+            modeSwitcher.querySelectorAll(".switcher-btn").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+
+            // ── Save current mode's conversation ID before switching ──
+            localStorage.setItem(convStorageKey(currentMode), currentConvId);
+
+            currentMode = newMode;
+
+            // ── Restore the previous conversation for the new mode ────
+            const savedId = localStorage.getItem(convStorageKey(newMode));
+            if (savedId) {
+                // Find the conversation to get its title
+                const convList = getAllConversations();
+                const conv = convList.find(c => c.id === savedId);
+                loadConversation(savedId, conv ? conv.title : "Chat");
+            } else {
+                // First time entering this mode — start fresh
+                startNewChat();
+            }
+
+            // Toggle welcome chips & placeholder
+            if (currentMode === "report") {
+                if (welcomeChips) welcomeChips.classList.add("hidden");
+                if (welcomeChipsReport) welcomeChipsReport.classList.remove("hidden");
+                questionInput.placeholder = "Describe the report you want (e.g., sales performance analysis, top products by revenue...)";
+            } else {
+                if (welcomeChips) welcomeChips.classList.remove("hidden");
+                if (welcomeChipsReport) welcomeChipsReport.classList.add("hidden");
+                questionInput.placeholder = "Ask a question about your data...";
+            }
+        });
+    }
 
     // ── Auto-resize textarea ───────────────────────────────────────────────
     questionInput.addEventListener("input", () => {
@@ -239,7 +365,112 @@
         questionInput.style.height = "";
         scrollToBottom();
 
-        // Show typing indicator
+        // ── Report Mode: generate or modify ──
+        if (currentMode === "report") {
+            const typingEl = appendTypingIndicator();
+            scrollToBottom();
+
+            // Allow mode switching while report generates
+            isLoading = false;
+            submitBtn.disabled = false;
+
+            // Capture the conversation context so mode-switching doesn't break it
+            const capturedConvId = currentConvId;
+
+            // ── Smart detection: is this a MODIFICATION or a NEW report? ──
+            const isModification = latestReportData !== null && isModificationCommand(question);
+
+            let fetchPromise;
+
+            if (isModification) {
+                // ── Modify the existing report ──
+                // Strip executed data to keep payload small for the LLM
+                const cleanReport = stripReportData(latestReportData);
+                fetchPromise = fetch("/report/modify", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        report_json: JSON.stringify(cleanReport),
+                        modification: question,
+                        provider: selectedProvider,
+                    }),
+                });
+            } else {
+                // ── Generate a new report ──
+                // Clear any previous report state
+                latestReportData = null;
+                latestReportId = null;
+                reportWindow = null;
+                fetchPromise = fetch("/report", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ question, provider: selectedProvider }),
+                });
+            }
+
+            fetchPromise
+            .then(res => {
+                if (!res.ok) throw new Error(isModification ? "Report modification failed" : "Report generation failed");
+                return res.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                // Store the report data for future modifications
+                latestReportData = data.report;
+
+                // Use same report ID if modifying (replaces in sessionStorage)
+                const reportId = isModification && latestReportId ? latestReportId : "rpt_" + Date.now();
+                latestReportId = reportId;
+
+                sessionStorage.setItem(reportId, JSON.stringify(data));
+                sessionStorage.setItem(reportId + "_question", question);
+                sessionStorage.setItem(reportId + "_provider", selectedProvider);
+                sessionStorage.setItem(reportId + "_theme", document.documentElement.getAttribute("data-theme") || "light");
+
+                // Only update UI if still on the same conversation
+                if (currentConvId === capturedConvId) {
+                    typingEl.remove();
+                    if (isModification) {
+                        appendAssistantMessage("✅ Report updated successfully! The report tab has been refreshed.");
+                    } else {
+                        appendReportSuccessMessage(question, reportId);
+                    }
+                    scrollToBottom();
+                } else {
+                    typingEl.remove();
+                }
+
+                // Open new tab or refresh existing one
+                if (isModification && reportWindow && !reportWindow.closed) {
+                    reportWindow.location.href = `/report-view?id=${reportId}&t=${Date.now()}`;
+                    reportWindow.focus();
+                } else {
+                    reportWindow = window.open(`/report-view?id=${reportId}`, "_blank");
+                }
+            })
+            .catch(err => {
+                if (currentConvId === capturedConvId) {
+                    typingEl.remove();
+                    appendErrorMessage(err.message || "Report operation failed.");
+                    scrollToBottom();
+                } else {
+                    typingEl.remove();
+                }
+            });
+
+            // Update sidebar
+            const convs = getConversations();
+            if (!convs.find(c => c.id === capturedConvId)) {
+                addConversationToList(capturedConvId, question);
+                topbarTitle.textContent = question.length > 40 ? question.slice(0, 40) + "..." : question;
+            }
+            return;
+        }
+
+        // ── Chat Mode: normal /chat flow ──
         const typingEl = appendTypingIndicator();
         scrollToBottom();
 
@@ -261,13 +492,19 @@
                 appendErrorMessage(err.detail || `HTTP ${res.status}`);
             } else {
                 const data = await res.json();
-                appendAIMessage(data);
+
+                // Check if this is a report intent
+                if (data.mode === "report") {
+                    appendReportMessage(question, data);
+                } else {
+                    appendAIMessage(data);
+                }
 
                 // Update sidebar: first question becomes the conversation title
                 const convs = getConversations();
                 if (!convs.find(c => c.id === currentConvId)) {
                     addConversationToList(currentConvId, question);
-                    topbarTitle.textContent = question.length > 40 ? question.slice(0, 40) + "…" : question;
+                    topbarTitle.textContent = question.length > 40 ? question.slice(0, 40) + "..." : question;
                 }
             }
         } catch (err) {
@@ -277,6 +514,160 @@
 
         isLoading = false;
         submitBtn.disabled = false;
+        scrollToBottom();
+    }
+
+    // ── Report message (shows button to open report in new tab) ───────────
+    function appendReportMessage(question, chatData) {
+        const el = document.createElement("div");
+        el.className = "msg msg-ai";
+
+        const reportId = "rpt_" + Date.now();
+
+        el.innerHTML = `
+            <div class="ai-avatar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                    <path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+                </svg>
+            </div>
+            <div class="ai-body">
+                <div class="ai-answer">${escapeHtml(chatData.answer)}</div>
+                <div class="report-trigger-card">
+                    <div class="report-trigger-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                            <line x1="3" y1="9" x2="21" y2="9"/>
+                            <line x1="9" y1="21" x2="9" y2="9"/>
+                        </svg>
+                    </div>
+                    <div class="report-trigger-info">
+                        <div class="report-trigger-title">Analytics Report Detected</div>
+                        <div class="report-trigger-desc">I can generate a comprehensive dashboard with KPIs, charts, data tables, and insights for your query.</div>
+                    </div>
+                    <button class="report-trigger-btn" data-report-id="${reportId}" data-question="${escapeHtml(question)}">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                            <line x1="3" y1="9" x2="21" y2="9"/>
+                            <line x1="9" y1="21" x2="9" y2="9"/>
+                        </svg>
+                        Generate Report
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="report-trigger-arrow">
+                            <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>`;
+
+        // Wire up the report button
+        const btn = el.querySelector(".report-trigger-btn");
+        btn.addEventListener("click", () => {
+            generateAndOpenReport(question, reportId, btn);
+        });
+
+        chatThread.appendChild(el);
+    }
+
+    // ── Report success message (used by report mode) ──────────────────────
+    function appendReportSuccessMessage(question, reportId) {
+        const el = document.createElement("div");
+        el.className = "msg msg-ai";
+        el.innerHTML = `
+            <div class="ai-avatar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                    <path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+                </svg>
+            </div>
+            <div class="ai-body">
+                <div class="ai-answer">Your analytics report has been generated and opened in a new tab.</div>
+                <div class="report-trigger-card">
+                    <div class="report-trigger-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                            <line x1="3" y1="9" x2="21" y2="9"/>
+                            <line x1="9" y1="21" x2="9" y2="9"/>
+                        </svg>
+                    </div>
+                    <div class="report-trigger-info">
+                        <div class="report-trigger-title">Report Ready</div>
+                        <div class="report-trigger-desc">${escapeHtml(question)}</div>
+                    </div>
+                    <button class="report-trigger-btn report-trigger-btn-success" onclick="window.open('/report-view?id=${reportId}', '_blank')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                        Open Report
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="report-trigger-arrow"><polyline points="9 18 15 12 9 6"/></svg>
+                    </button>
+                </div>
+            </div>`;
+        chatThread.appendChild(el);
+    }
+
+    async function generateAndOpenReport(question, reportId, btn) {
+        // Disable button and show loading
+        btn.disabled = true;
+        btn.innerHTML = `
+            <div class="report-btn-spinner"></div>
+            Generating Report...
+        `;
+
+        try {
+            const res = await fetch("/report", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    question,
+                    provider: selectedProvider,
+                }),
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ detail: res.statusText }));
+                btn.disabled = false;
+                btn.innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                    Retry Report
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="report-trigger-arrow"><polyline points="9 18 15 12 9 6"/></svg>
+                `;
+                appendErrorMessage("Report generation failed: " + (err.detail || err.error || "Unknown error"));
+                return;
+            }
+
+            const reportData = await res.json();
+
+            // Store report data in sessionStorage
+            sessionStorage.setItem(reportId, JSON.stringify(reportData));
+            sessionStorage.setItem(reportId + "_question", question);
+            sessionStorage.setItem(reportId + "_provider", selectedProvider);
+            sessionStorage.setItem(reportId + "_theme", document.documentElement.getAttribute("data-theme") || "light");
+
+            // Update button to "Open Report"
+            btn.disabled = false;
+            btn.classList.add("report-trigger-btn-success");
+            btn.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                Open Report
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="report-trigger-arrow"><polyline points="9 18 15 12 9 6"/></svg>
+            `;
+
+            // Re-wire to only open the report (not regenerate)
+            btn.onclick = () => {
+                window.open(`/report-view?id=${reportId}`, "_blank");
+            };
+
+            // Auto-open the report
+            window.open(`/report-view?id=${reportId}`, "_blank");
+
+        } catch (err) {
+            btn.disabled = false;
+            btn.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                Retry Report
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="report-trigger-arrow"><polyline points="9 18 15 12 9 6"/></svg>
+            `;
+            appendErrorMessage("Report generation failed: " + err.message);
+        }
+
         scrollToBottom();
     }
 
@@ -399,6 +790,22 @@
             </div>
             <div class="ai-body">
                 <div class="ai-error">${escapeHtml(msg)}</div>
+            </div>`;
+        chatThread.appendChild(el);
+    }
+
+    function appendAssistantMessage(msg) {
+        const el = document.createElement("div");
+        el.className = "msg msg-ai";
+        el.innerHTML = `
+            <div class="ai-avatar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                    <path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+                </svg>
+            </div>
+            <div class="ai-body">
+                <div class="answer-text">${escapeHtml(msg)}</div>
             </div>`;
         chatThread.appendChild(el);
     }

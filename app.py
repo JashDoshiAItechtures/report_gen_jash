@@ -84,11 +84,44 @@ class ExecuteSQLResponse(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    mode: str = "chat"
     sql: str
     data: list
     row_count: int
     answer: str
     insights: str
+
+
+class ReportRequest(BaseModel):
+    question: str
+    provider: str = "groq"
+    conversation_id: str | None = None
+    # Filters
+    date_from: str | None = None
+    date_to: str | None = None
+    aggregation: str | None = None  # daily|weekly|monthly|quarterly|yearly
+    category: str | None = None
+    customer: str | None = None
+    status: str | None = None
+    product: str | None = None
+
+
+class ReportApplyFiltersRequest(BaseModel):
+    """Apply filters to an existing report without re-generating via LLM."""
+    report: dict  # The current report JSON
+    date_from: str | None = None
+    date_to: str | None = None
+    category: str | None = None
+    customer: str | None = None
+    status: str | None = None
+    product: str | None = None
+    provider: str = "groq"
+
+
+class ReportModifyRequest(BaseModel):
+    report_json: str
+    modification: str
+    provider: str = "groq"
 
 
 # ── Endpoints ───────────────────────────────────────────────────────────────
@@ -138,6 +171,7 @@ def execute_sql_endpoint(req: ExecuteSQLRequest):
 @app.post("/chat", response_model=ChatResponse)
 def chat_endpoint(req: QuestionRequest):
     from ai.pipeline import SQLAnalystPipeline
+    from ai.report_generator import classify_intent
     from db.memory import get_recent_history, add_turn
 
     logger.info(
@@ -146,6 +180,10 @@ def chat_endpoint(req: QuestionRequest):
         req.conversation_id or "default",
         req.question,
     )
+
+    # Classify intent — deterministic, no LLM call
+    intent = classify_intent(req.question)
+    logger.info("CHAT intent classified as: %s", intent)
 
     conversation_id = req.conversation_id or "default"
 
@@ -191,12 +229,119 @@ def chat_endpoint(req: QuestionRequest):
     )
 
     return ChatResponse(
+        mode="chat",
         sql=result["sql"],
         data=result["data"],
         row_count=len(result.get("data") or []),
         answer=result["answer"],
         insights=result["insights"],
     )
+
+
+@app.post("/report")
+def report_endpoint(req: ReportRequest):
+    """Generate a full analytics report from a natural-language question."""
+    from ai.report_generator import ReportPipeline
+
+    # Build filter context string for the LLM
+    filters = []
+    if req.date_from:
+        filters.append(f"Date range: from {req.date_from}")
+    if req.date_to:
+        filters.append(f"to {req.date_to}")
+    if req.aggregation:
+        filters.append(f"Time aggregation: {req.aggregation}")
+    if req.category:
+        filters.append(f"Category filter: {req.category}")
+    if req.customer:
+        filters.append(f"Customer filter: {req.customer}")
+    if req.status:
+        filters.append(f"Order status filter: {req.status}")
+    if req.product:
+        filters.append(f"Product filter: {req.product}")
+
+    filter_ctx = ""
+    if filters:
+        filter_ctx = "\n[ACTIVE FILTERS: " + ", ".join(filters) + ". Apply these filters in ALL SQL WHERE clauses.]"
+
+    question_with_filters = req.question + filter_ctx
+
+    logger.info("REPORT request | question=%s | filters=%s", req.question, filter_ctx or "none")
+    pipeline = ReportPipeline(provider=req.provider)
+    return pipeline.generate(question_with_filters)
+
+
+@app.post("/report/apply-filters")
+def report_apply_filters_endpoint(req: ReportApplyFiltersRequest):
+    """Apply filters to an existing report by injecting WHERE clauses into SQL.
+
+    This does NOT call the LLM — it modifies the existing SQL queries directly,
+    making it much faster and more reliable than regenerating the entire report.
+    """
+    from ai.report_generator import ReportPipeline
+
+    filters = {}
+    if req.date_from:
+        filters["date_from"] = req.date_from
+    if req.date_to:
+        filters["date_to"] = req.date_to
+    if req.category:
+        filters["category"] = req.category
+    if req.customer:
+        filters["customer"] = req.customer
+    if req.status:
+        filters["status"] = req.status
+    if req.product:
+        filters["product"] = req.product
+
+    logger.info("REPORT APPLY-FILTERS | filters=%s", filters)
+    pipeline = ReportPipeline(provider=req.provider)
+    return pipeline.apply_filters(req.report, filters)
+
+
+@app.post("/report/modify")
+def report_modify_endpoint(req: ReportModifyRequest):
+    """Modify an existing report based on a natural-language command."""
+    from ai.report_generator import ReportPipeline
+
+    logger.info("REPORT MODIFY | command=%s", req.modification)
+    pipeline = ReportPipeline(provider=req.provider)
+    return pipeline.modify(req.report_json, req.modification)
+
+
+# ── Filter values endpoint ──────────────────────────────────────────────────
+
+@app.get("/report/filters")
+def report_filters_endpoint():
+    """Return distinct filter values for the report filter bar."""
+    from db.executor import execute_sql
+
+    result = {}
+
+    # Categories
+    cat_res = execute_sql("SELECT DISTINCT category FROM product_master WHERE category IS NOT NULL ORDER BY category")
+    result["categories"] = [r["category"] for r in (cat_res["data"] if cat_res["success"] else [])]
+
+    # Customers
+    cust_res = execute_sql("SELECT DISTINCT customer_name FROM customer_master WHERE customer_name IS NOT NULL ORDER BY customer_name LIMIT 100")
+    result["customers"] = [r["customer_name"] for r in (cust_res["data"] if cust_res["success"] else [])]
+
+    # Products (top 100)
+    prod_res = execute_sql("SELECT DISTINCT product_name FROM product_master WHERE product_name IS NOT NULL ORDER BY product_name LIMIT 100")
+    result["products"] = [r["product_name"] for r in (prod_res["data"] if prod_res["success"] else [])]
+
+    # Statuses
+    stat_res = execute_sql("SELECT DISTINCT status FROM sales_order WHERE status IS NOT NULL ORDER BY status")
+    result["statuses"] = [r["status"] for r in (stat_res["data"] if stat_res["success"] else [])]
+
+    # Date range
+    date_res = execute_sql("SELECT MIN(order_date)::text AS min_date, MAX(order_date)::text AS max_date FROM sales_order")
+    if date_res["success"] and date_res["data"]:
+        result["date_range"] = date_res["data"][0]
+    else:
+        result["date_range"] = {"min_date": None, "max_date": None}
+
+    return result
 
 
 # ── Schema info endpoint (for debugging / transparency) ─────────────────────
@@ -278,6 +423,12 @@ app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 @app.get("/")
 def serve_frontend():
     return FileResponse(str(FRONTEND_DIR / "index.html"))
+
+
+@app.get("/report-view")
+def serve_report_view():
+    """Serve the standalone report viewer page (opens in new tab)."""
+    return FileResponse(str(FRONTEND_DIR / "report.html"))
 
 
 # ── Run ─────────────────────────────────────────────────────────────────────
