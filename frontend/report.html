@@ -74,12 +74,13 @@
         /* ── Summary — Premium ───────────────────────────────── */
         .report-summary {
             max-width: 1400px; margin: 0 auto 1.25rem;
-            padding: 1rem 1.25rem; border-radius: 14px;
-            background: linear-gradient(135deg, rgba(99,102,241,0.06), rgba(59,130,246,0.04));
-            border: 1px solid rgba(99,102,241,0.12);
+            padding: 1.1rem 1.4rem; border-radius: 16px;
+            background: linear-gradient(135deg, rgba(99,102,241,0.07), rgba(59,130,246,0.04));
+            border: 1px solid rgba(99,102,241,0.14);
             border-left: 4px solid var(--accent-indigo);
+            box-shadow: 0 2px 12px rgba(99,102,241,0.06);
         }
-        .report-summary-text { font-size: 0.8rem; line-height: 1.7; color: var(--text-secondary); }
+        .report-summary-text { font-size: 0.82rem; line-height: 1.78; color: var(--text-secondary); }
 
         /* ── Section Labels ──────────────────────────────────── */
         .report-section-label {
@@ -107,11 +108,19 @@
             gap: 0.75rem;
         }
         .kpi-card {
-            background: var(--bg-card); border: 1px solid var(--border-subtle);
-            border-radius: 14px; padding: 0.85rem 1rem; position: relative;
+            background: rgba(255,255,255,0.6);
+            backdrop-filter: blur(12px) saturate(1.4);
+            -webkit-backdrop-filter: blur(12px) saturate(1.4);
+            border: 1px solid rgba(99,102,241,0.1);
+            border-radius: 16px; padding: 1rem 1.15rem; position: relative;
             overflow: hidden; transition: transform 0.25s ease, box-shadow 0.25s ease;
+            box-shadow: 0 2px 12px rgba(99,102,241,0.05), 0 1px 3px rgba(0,0,0,0.04);
         }
-        .kpi-card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,0.08); }
+        [data-theme="dark"] .kpi-card {
+            background: rgba(22,27,34,0.6);
+            border-color: rgba(99,102,241,0.18);
+        }
+        .kpi-card:hover { transform: translateY(-3px); box-shadow: 0 12px 32px rgba(99,102,241,0.14); }
         .kpi-card::before {
             content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
         }
@@ -134,20 +143,34 @@
         /* ── Charts Grid — Premium ────────────────────────────── */
         .charts-grid {
             max-width: 1400px; margin: 0 auto 1rem;
-            display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem;
+            display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem;
         }
         .charts-grid .chart-card:last-child:nth-child(odd) {
             grid-column: 1 / -1;
         }
         .chart-card {
-            background: var(--bg-card); border: 1px solid var(--border-subtle);
-            border-radius: 14px; padding: 0.85rem; transition: all 0.25s ease;
+            background: rgba(255,255,255,0.55);
+            backdrop-filter: blur(12px) saturate(1.4);
+            -webkit-backdrop-filter: blur(12px) saturate(1.4);
+            border: 1px solid rgba(99,102,241,0.12);
+            border-radius: 16px; padding: 1rem 1.1rem; transition: all 0.25s ease;
+            box-shadow: 0 2px 16px rgba(99,102,241,0.06), 0 1px 3px rgba(0,0,0,0.04);
         }
-        .chart-card:hover { box-shadow: 0 8px 24px rgba(0,0,0,0.06); }
+        [data-theme="dark"] .chart-card {
+            background: rgba(22,27,34,0.55);
+            border-color: rgba(99,102,241,0.18);
+            box-shadow: 0 2px 16px rgba(0,0,0,0.25);
+        }
+        .chart-card:hover {
+            box-shadow: 0 12px 32px rgba(99,102,241,0.12), 0 2px 8px rgba(0,0,0,0.06);
+            transform: translateY(-2px);
+            border-color: rgba(99,102,241,0.22);
+        }
         .chart-full-width { grid-column: 1 / -1; }
-        .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }
-        .chart-title { font-size: 0.76rem; font-weight: 700; color: var(--text-primary); }
-        .chart-body { position: relative; height: 240px; }
+        .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.55rem; }
+        .chart-title { font-size: 0.8rem; font-weight: 700; color: var(--text-primary); letter-spacing: -0.015em; }
+        .chart-body { position: relative; height: 270px; }
+        .chart-full-width .chart-body { height: 310px; }
         .chart-error {
             display: flex; align-items: center; justify-content: center; height: 100%;
             font-size: 0.72rem; color: var(--accent-rose); text-align: center; padding: 0.5rem;

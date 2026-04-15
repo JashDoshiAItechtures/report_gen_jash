@@ -32,17 +32,34 @@
     // ── Modification Detection ───────────────────────────────────────
     function isModificationCommand(text) {
         const q = text.toLowerCase().trim();
+
+        // Keyword-based detection
         const modKeywords = [
             "change", "replace", "swap", "switch", "modify", "update", "edit",
             "add a kpi", "add kpi", "add a chart", "add chart", "add one more",
             "remove the", "remove kpi", "remove chart", "delete the", "delete kpi",
-            "rename", "make it", "convert to", "convert the", "turn into",
+            "rename", "make it", "convert to", "convert the", "turn into", "turn the",
             "to a bar", "to bar", "to a pie", "to pie", "to a line", "to line",
-            "to doughnut", "to a doughnut", "to area", "to horizontal",
+            "to a line graph", "to line graph", "to a bar chart", "to a bar graph",
+            "to doughnut", "to a doughnut", "to area", "to an area", "to horizontal",
+            "to a stacked", "to stacked", "to a scatter",
             "instead of", "more kpi", "another kpi", "another chart",
             "change color", "change the color", "update the title",
+            "make the", "set the", "show it as", "display as", "show as",
         ];
-        return modKeywords.some(kw => q.includes(kw));
+        if (modKeywords.some(kw => q.includes(kw))) return true;
+
+        // Regex-based detection — catches 'change the X chart to Y' style commands
+        const modPatterns = [
+            /\bchange\b.+\b(chart|graph|kpi|metric|plot|title|color|legend)\b/i,
+            /\b(convert|turn|switch|transform)\b.+\b(chart|graph|kpi|plot)\b/i,
+            /\b(pie|bar|line|doughnut|area|horizontal|stacked)\b.+\b(chart|graph)\b.+\b(to|into|as)\b/i,
+            /\bto\s+a?\s*(bar|line|pie|doughnut|area|horizontalbar|stackedbar)\b/i,
+            /\b(remove|delete|hide|drop)\b.+\b(chart|kpi|metric|graph|insight)\b/i,
+            /\badd\b.+\b(chart|kpi|metric|graph|insight)\b/i,
+            /\b(rename|relabel|retitle)\b/i,
+        ];
+        return modPatterns.some(p => p.test(q));
     }
 
     // ── Strip executed data from report before sending to LLM ────────
@@ -426,7 +443,10 @@
                 latestReportId = reportId;
 
                 sessionStorage.setItem(reportId, JSON.stringify(data));
-                sessionStorage.setItem(reportId + "_question", question);
+                // Preserve the original report question — don't overwrite with the modification command
+                if (!isModification) {
+                    sessionStorage.setItem(reportId + "_question", question);
+                }
                 sessionStorage.setItem(reportId + "_provider", selectedProvider);
                 sessionStorage.setItem(reportId + "_theme", document.documentElement.getAttribute("data-theme") || "light");
 

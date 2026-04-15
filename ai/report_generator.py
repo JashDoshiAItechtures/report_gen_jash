@@ -29,12 +29,28 @@ MAX_REPAIR_RETRIES = 2
 # ── Intent classification (deterministic — no LLM) ─────────────────────────
 
 _REPORT_KEYWORDS = [
+    # Generic report terms
     "report", "dashboard", "analyze", "analysis", "trend", "trends",
     "summary", "comparison", "compare", "insight", "insights",
     "performance", "overview", "breakdown", "kpi", "kpis",
     "analytics", "metrics", "statistics", "visualize", "visualization",
-    "chart", "graph", "show me", "give me a report", "sales report",
-    "revenue report", "top 10", "top 5", "top 20",
+    "chart", "graph", "show me", "give me a report",
+    "top 10", "top 5", "top 20",
+    # Sales / revenue
+    "sales report", "revenue report", "revenue analysis",
+    # Operations / order status
+    "open orders", "open order", "inorder", "in-order", "in order",
+    "order status", "order fulfillment", "active orders", "pending orders",
+    # Backorder
+    "backorder", "back order", "back-order", "unfulfilled", "outstanding orders",
+    # Procurement / purchasing
+    "purchase order", "procurement", "vendor report", "vendor analysis",
+    "po report", "supplier report",
+    # Customer / product
+    "customer report", "customer analysis", "product report", "product analysis",
+    "inventory report", "stock report",
+    # Financial
+    "cost report", "margin report", "profitability", "financial report",
 ]
 
 _REPORT_PATTERNS = [
@@ -42,6 +58,13 @@ _REPORT_PATTERNS = [
     r"\b(?:sales|revenue|order|product|customer|vendor)\s+(?:performance|analysis|breakdown|trend|summary)\b",
     r"\b(?:analyze|analyse)\b",
     r"\btop\s+\d+\b.*\b(?:product|customer|vendor|item|sku)\b",
+    # Operational / backorder / procurement report patterns
+    r"\b(?:backorder|back-order|inorder|in-order)\b",
+    r"\b(?:open|pending|active|processing)\s+orders?\b",
+    r"\b(?:order|purchase)\s+(?:status|fulfillment|pipeline)\b",
+    r"\b(?:procurement|purchasing)\s+(?:report|analysis|overview|summary|dashboard)\b",
+    r"\b(?:vendor|supplier)\s+(?:report|analysis|performance|summary)\b",
+    r"\bunfulfilled\s+(?:orders?|lines?)\b",
 ]
 
 
@@ -293,6 +316,66 @@ def _fix_report_sql(sql: str) -> str:
     # if Pass 2 ran.  But handle the case where the LLM omits sales_order_line entirely
     # and writes: FROM sales_order so JOIN product_master pm ON so.product_id = pm.product_id
     # (After Pass 2, this becomes sol.product_id, and the JOIN is already injected.)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # PASS 4: Fix raw product_id / variant_sku used as a chart label column.
+    #
+    # The LLM sometimes writes:
+    #   SELECT sol.product_id, SUM(...) AS value FROM ... GROUP BY sol.product_id
+    # This produces SKU codes (PROD-0484) as labels instead of human-readable names.
+    # Fix: inject JOIN to product_master and replace with pm.product_name.
+    # ══════════════════════════════════════════════════════════════════════
+
+    # Detect sol.<alias>.product_id or sol.variant_sku as first SELECT token
+    _sol_alias_m = re.search(r'\bsales_order_line\b(?!_)\s+(\w+)', sql_oneline, re.IGNORECASE)
+    _sol_alias_p4 = _sol_alias_m.group(1) if _sol_alias_m else 'sol'
+
+    # Check: does the SELECT clause start with <sol_alias>.product_id or .variant_sku?
+    _select_label_pid = re.search(
+        rf'\bSELECT\s+{re.escape(_sol_alias_p4)}\.(product_id|variant_sku)\b',
+        sql_oneline, re.IGNORECASE
+    )
+    if _select_label_pid:
+        logger.info(
+            "SQL auto-correct PASS 4: %s.%s used as chart label — rewriting to pm.product_name",
+            _sol_alias_p4, _select_label_pid.group(1)
+        )
+        # Check if product_master is already joined
+        _has_pm = bool(re.search(r'\bproduct_master\b', sql_oneline, re.IGNORECASE))
+        _pm_alias = 'pm'
+        if not _has_pm:
+            # Find a good place to inject: after the last JOIN or after FROM clause
+            # Inject before WHERE / GROUP / ORDER / LIMIT
+            _inject_point = re.search(
+                r'\b(WHERE|GROUP\s+BY|ORDER\s+BY|LIMIT)\b', sql_oneline, re.IGNORECASE
+            )
+            if _inject_point:
+                pos = _inject_point.start()
+                sql_oneline = (
+                    sql_oneline[:pos]
+                    + f'JOIN product_master {_pm_alias} ON {_sol_alias_p4}.product_id = {_pm_alias}.product_id '
+                    + sql_oneline[pos:]
+                )
+            else:
+                sql_oneline += f' JOIN product_master {_pm_alias} ON {_sol_alias_p4}.product_id = {_pm_alias}.product_id'
+        else:
+            # Find the pm alias already in use
+            _pm_alias_m = re.search(r'\bproduct_master\s+(\w+)', sql_oneline, re.IGNORECASE)
+            if _pm_alias_m:
+                _pm_alias = _pm_alias_m.group(1)
+
+        # Replace the label column in SELECT
+        sql_oneline = re.sub(
+            rf'\bSELECT\s+{re.escape(_sol_alias_p4)}\.(product_id|variant_sku)\b',
+            f'SELECT {_pm_alias}.product_name',
+            sql_oneline, count=1, flags=re.IGNORECASE
+        )
+        # Replace in GROUP BY
+        sql_oneline = re.sub(
+            rf'\bGROUP\s+BY\s+{re.escape(_sol_alias_p4)}\.(product_id|variant_sku)\b',
+            f'GROUP BY {_pm_alias}.product_name',
+            sql_oneline, flags=re.IGNORECASE
+        )
 
     sql = sql_oneline
 
@@ -594,23 +677,124 @@ class ReportPipeline:
         )
 
     @staticmethod
+    def _repair_json(text: str) -> str:
+        """Best-effort repair of common LLM JSON generation errors.
+
+        Handles:
+        1. Literal newlines / tabs / carriage-returns inside string values
+        2. Trailing commas before } or ]
+        3. Truncated JSON (missing closing braces/brackets)
+        """
+        # ── Pass 1: escape unescaped control chars inside string literals ──
+        result: list[str] = []
+        in_string = False
+        escape_next = False
+
+        for ch in text:
+            if escape_next:
+                result.append(ch)
+                escape_next = False
+                continue
+            if ch == "\\":
+                escape_next = True
+                result.append(ch)
+                continue
+            if ch == '"':
+                in_string = not in_string
+                result.append(ch)
+                continue
+            if in_string:
+                if ch == "\n":
+                    result.append("\\n")
+                elif ch == "\r":
+                    result.append("\\r")
+                elif ch == "\t":
+                    result.append("\\t")
+                else:
+                    result.append(ch)
+            else:
+                result.append(ch)
+
+        text = "".join(result)
+
+        # ── Pass 2: remove trailing commas before } or ] ───────────────────
+        import re as _re
+        text = _re.sub(r",(\s*[}\]])", r"\1", text)
+
+        # ── Pass 3: close any truncated JSON ──────────────────────────────
+        # Count unmatched { and [
+        depth_brace = 0
+        depth_bracket = 0
+        in_str = False
+        esc = False
+        for ch in text:
+            if esc:
+                esc = False
+                continue
+            if ch == "\\" and in_str:
+                esc = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if not in_str:
+                if ch == "{":
+                    depth_brace += 1
+                elif ch == "}":
+                    depth_brace -= 1
+                elif ch == "[":
+                    depth_bracket += 1
+                elif ch == "]":
+                    depth_bracket -= 1
+
+        # If we ended mid-string, close it first
+        if in_str:
+            text += '"'
+        # Close any open arrays before open objects
+        if depth_bracket > 0:
+            text += "]" * depth_bracket
+        if depth_brace > 0:
+            text += "}" * depth_brace
+
+        return text
+
+    @staticmethod
     def _extract_json(raw: str) -> dict:
-        """Extract a JSON object from LLM output, stripping markdown fences."""
+        """Extract and parse JSON from LLM output with multi-stage repair."""
         text = raw.strip()
 
-        # Remove markdown code fences
+        # ── Strip markdown code fences ────────────────────────────────────
         if text.startswith("```"):
             lines = text.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
+            lines = [ln for ln in lines if not ln.strip().startswith("```")]
             text = "\n".join(lines).strip()
 
-        # Try to find JSON object boundaries
+        # ── Find JSON object boundaries ───────────────────────────────────
         start = text.find("{")
         end = text.rfind("}")
         if start != -1 and end != -1 and end > start:
             text = text[start:end + 1]
 
-        return json.loads(text)
+        # ── Stage 1: direct parse ─────────────────────────────────────────
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # ── Stage 2: repair then parse ────────────────────────────────────
+        repaired = ReportPipeline._repair_json(text)
+        try:
+            return json.loads(repaired)
+        except json.JSONDecodeError:
+            pass
+
+        # ── Stage 3: re-extract boundaries after repair and retry ─────────
+        start = repaired.find("{")
+        end = repaired.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            repaired = repaired[start:end + 1]
+
+        return json.loads(repaired)  # let the caller handle any final exception
 
     def _execute_kpi_sql(self, kpi: dict) -> dict:
         """Execute a KPI's SQL and populate its value."""
@@ -1219,6 +1403,23 @@ class ReportPipeline:
         """Modify an existing report based on a natural-language command."""
         schema_str = format_schema()
 
+        # ── Step 1: Record original chart types BEFORE the LLM call ──────────
+        # Any chart whose type changes in the LLM response was explicitly requested
+        # by the user — we must protect those from being overridden by auto-correction.
+        _original_types: dict[str, str] = {}
+        try:
+            _current = (
+                json.loads(current_report_json)
+                if isinstance(current_report_json, str)
+                else current_report_json
+            )
+            for c in _current.get("charts", []):
+                cid = c.get("id") or c.get("title", "")
+                if cid:
+                    _original_types[cid] = (c.get("type") or "bar").lower()
+        except Exception:
+            pass
+
         logger.info("Report modification — command: %s", modification)
 
         result = self.report_mod(
@@ -1236,6 +1437,19 @@ class ReportPipeline:
                 "error": f"Failed to modify report: {str(exc)}",
                 "report": None,
             }
+
+        # ── Step 2: Detect which chart types were explicitly changed ──────────
+        # These are "user-locked" — auto-correction must NOT touch them.
+        _user_locked: dict[str, str] = {}   # {chart_id_or_title: new_type_as_given}
+        for chart in report.get("charts", []):
+            cid = chart.get("id") or chart.get("title", "")
+            new_type = (chart.get("type") or "bar").lower()
+            if cid and cid in _original_types and _original_types[cid] != new_type:
+                _user_locked[cid] = chart.get("type") or new_type
+                logger.info(
+                    "Modification: chart '%s' type locked as '%s' (changed from '%s' — user intent)",
+                    cid, new_type, _original_types[cid],
+                )
 
         # Re-execute all SQL queries on the modified report
         for kpi in report.get("kpis", []):
@@ -1278,13 +1492,26 @@ class ReportPipeline:
             if valid_charts:
                 report["charts"] = valid_charts
 
-        # ── Smart chart-type auto-correction ──────────────────────────
+        # ── Smart chart-type auto-correction (data-shape fixes only) ──────────
+        # Run _smart_fix_chart_type for data-aggregation benefits (e.g. daily→monthly),
+        # but immediately restore any type that was explicitly set by the user.
         if "charts" in report:
             for chart in report["charts"]:
                 self._smart_fix_chart_type(chart)
 
-        if "charts" in report and len(report["charts"]) > 1:
-            report["charts"] = self._enforce_chart_diversity(report["charts"])
+        # ── Step 3: Restore user-locked chart types after auto-correction ─────
+        # _smart_fix_chart_type may have re-changed the type — undo that for locked charts.
+        # _enforce_chart_diversity is intentionally SKIPPED in modify() — it would override
+        # the user's explicit request (e.g. "change pie to bar").
+        if _user_locked and "charts" in report:
+            for chart in report["charts"]:
+                cid = chart.get("id") or chart.get("title", "")
+                if cid in _user_locked:
+                    chart["type"] = _user_locked[cid]
+                    logger.info(
+                        "Modification: enforced user-requested type '%s' for chart '%s'",
+                        _user_locked[cid], cid,
+                    )
 
         applicable_filters = self._detect_applicable_filters(report)
 

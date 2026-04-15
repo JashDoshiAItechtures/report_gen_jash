@@ -57,10 +57,15 @@
     function getChartDefaults() {
         const isDark = document.documentElement.getAttribute("data-theme") === "dark";
         return {
-            gridColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)",
-            textColor: isDark ? "#8d96a0" : "#64748b",
+            gridColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
+            textColor: isDark ? "#94a3b8" : "#475569",
             bgColor: isDark ? "#161b22" : "#ffffff",
         };
+    }
+
+    // Force crisp rendering on Retina / high-DPI screens
+    if (typeof Chart !== "undefined") {
+        Chart.defaults.devicePixelRatio = window.devicePixelRatio || 2;
     }
 
     // ── Streaming Render ──────────────────────────────────────────────────
@@ -199,10 +204,41 @@
             </div>
             <div class="charts-grid stream-section">`;
 
+            // Pre-compute which charts are naturally wide (line/area/stackedBar)
+            const naturallyWide = charts.map(c =>
+                ["line", "area", "stackedbar"].includes((c.type || "bar").toLowerCase())
+            );
+
+            // Simulate 2-col grid placement to find orphaned half-width charts.
+            // A half-width chart is orphaned when it is alone in its grid row
+            // (because the next chart is wide, or it is the last chart).
+            // Promote orphaned half-width charts to full-width to eliminate gaps.
+            const shouldBeWide = [...naturallyWide];
+            let col = 0; // current column cursor (0 = left, 1 = right)
+            for (let i = 0; i < charts.length; i++) {
+                if (shouldBeWide[i]) {
+                    col = 0; // wide chart consumes full row, next starts at col 0
+                } else {
+                    if (col === 0) {
+                        // This chart is in the left column.
+                        // Look ahead: if the next chart is wide (or there is no next),
+                        // this chart would sit alone — promote it to full-width.
+                        const nextWide = (i + 1 >= charts.length) || shouldBeWide[i + 1];
+                        if (nextWide) {
+                            shouldBeWide[i] = true;
+                            col = 0; // still starts fresh after a full-width
+                        } else {
+                            col = 1; // this takes col 0, next takes col 1
+                        }
+                    } else {
+                        col = 0; // paired with previous, next row starts at col 0
+                    }
+                }
+            }
+
             charts.forEach((chart, idx) => {
                 const hasExplanation = chart.explanation && (chart.explanation.what || chart.explanation.how);
-                const cType = (chart.type || "bar").toLowerCase();
-                const isWide = ["line", "area", "scatter", "stackedbar"].includes(cType);
+                const isWide = shouldBeWide[idx];
                 html += `<div class="chart-card${isWide ? " chart-full-width" : ""}">
                     <div class="chart-header">
                         <span class="chart-title">${escapeHtml(chart.title || "Chart " + (idx + 1))}</span>
@@ -535,31 +571,51 @@
             };
 
             if (chartType === "line") {
-                cfg.tension = 0.4;
+                cfg.tension = 0.45;
                 // Dynamic point size: hide dots when too many points
-                const ptRadius = data.length > 50 ? 0 : data.length > 20 ? 2 : 3;
-                const ptHover = data.length > 50 ? 4 : 6;
+                const ptRadius = data.length > 50 ? 0 : data.length > 20 ? 2 : 4;
+                const ptHover = data.length > 50 ? 5 : 7;
                 cfg.pointRadius = ptRadius;
                 cfg.pointHoverRadius = ptHover;
                 cfg.pointBackgroundColor = color;
                 cfg.pointBorderColor = "#fff";
                 cfg.pointBorderWidth = ptRadius > 0 ? 2 : 0;
                 cfg.borderWidth = data.length > 50 ? 2 : 2.5;
-                if (isArea) { cfg.fill = true; cfg.backgroundColor = color + "22"; }
+                if (isArea) {
+                    cfg.fill = "origin";
+                    cfg.backgroundColor = (ctx) => {
+                        if (!ctx.chart.chartArea) return color + "18";
+                        const { top, bottom } = ctx.chart.chartArea;
+                        const gradient = ctx.chart.ctx.createLinearGradient(0, top, 0, bottom);
+                        gradient.addColorStop(0, color + "55");
+                        gradient.addColorStop(1, color + "04");
+                        return gradient;
+                    };
+                } else {
+                    cfg.backgroundColor = color + "18";
+                }
             }
 
             if (chartType === "bar") {
-                cfg.borderRadius = 5;
+                // Glass-transparent bar: very light fill, crisp colored border
+                cfg.borderRadius = isHorizontal ? 4 : 6;
                 cfg.borderSkipped = false;
-                cfg.borderWidth = 1.5;
-                cfg.hoverBackgroundColor = color + "88";
+                cfg.borderWidth = 2;
+                cfg.borderColor = color;
+                cfg.backgroundColor = color + (isStacked ? "44" : "22");
+                cfg.hoverBackgroundColor = color + "55";
+                cfg.hoverBorderColor = color;
+                cfg.hoverBorderWidth = 2.5;
             }
 
             if (isPieType(chartType)) {
-                cfg.backgroundColor = colors.slice(0, values.length).map(c => c + "cc");
+                // Semi-transparent slices with a clean white/dark separator
+                cfg.backgroundColor = colors.slice(0, values.length).map(c => c + "bb");
                 cfg.borderColor = defaults.bgColor;
                 cfg.borderWidth = 2;
-                cfg.hoverOffset = 6;
+                cfg.hoverBackgroundColor = colors.slice(0, values.length).map(c => c + "ee");
+                cfg.hoverOffset = 10;
+                cfg.hoverBorderWidth = 0;
             }
 
             if (chartType === "radar") {
@@ -595,6 +651,7 @@
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                devicePixelRatio: window.devicePixelRatio || 2,
                 indexAxis: isHorizontal ? "y" : "x",
                 interaction: {
                     intersect: (chartType === "line" || chartType === "area") ? false : true,
@@ -606,8 +663,8 @@
                         position: isPieType(chartType) ? "right" : "top",
                         labels: {
                             color: defaults.textColor,
-                            font: { family: "'Inter', sans-serif", size: 10, weight: 500 },
-                            padding: 8, usePointStyle: true, pointStyleWidth: 7,
+                            font: { family: "'Inter', sans-serif", size: 11, weight: 500 },
+                            padding: 10, usePointStyle: true, pointStyleWidth: 8,
                         },
                     },
                     tooltip: {
@@ -654,32 +711,51 @@
         };
 
         if (!isPieType(chartType) && chartType !== "radar" && chartType !== "polarArea") {
+            const numFmtCallback = val => {
+                if (typeof val !== "number") return val;
+                if (Math.abs(val) >= 10000000) return (val / 10000000).toFixed(1) + "Cr";
+                if (Math.abs(val) >= 100000)   return (val / 100000).toFixed(1) + "L";
+                if (Math.abs(val) >= 1000)     return (val / 1000).toFixed(1) + "K";
+                return val;
+            };
+            // For horizontal bar: x=values (needs number fmt), y=labels (plain text)
+            // For all others:     x=labels (plain text),     y=values (needs number fmt)
+            const valueAxisKey  = isHorizontal ? "x" : "y";
+            const labelAxisKey  = isHorizontal ? "y" : "x";
             config.options.scales = {
-                x: {
-                    grid: { color: defaults.gridColor, drawBorder: false },
-                    ticks: { color: defaults.textColor, font: { family: "'Inter'", size: 9 }, maxRotation: 45 },
-                    title: chartSpec.x_label ? {
-                        display: true, text: chartSpec.x_label, color: defaults.textColor,
-                        font: { family: "'Inter'", size: 10, weight: 600 },
-                    } : undefined,
-                    stacked: isStacked,
-                },
-                y: {
+                [valueAxisKey]: {
                     grid: { color: defaults.gridColor, drawBorder: false },
                     ticks: {
-                        color: defaults.textColor, font: { family: "'Inter'", size: 9 },
-                        callback: val => {
-                            if (typeof val === "number" && Math.abs(val) >= 10000000) return (val / 10000000).toFixed(1) + "Cr";
-                            if (typeof val === "number" && Math.abs(val) >= 100000) return (val / 100000).toFixed(1) + "L";
-                            if (typeof val === "number" && Math.abs(val) >= 1000) return (val / 1000).toFixed(1) + "K";
-                            return val;
-                        },
+                        color: defaults.textColor,
+                        font: { family: "'Inter'", size: 11, weight: 500 },
+                        callback: numFmtCallback,
+                        maxTicksLimit: 8,
                     },
-                    title: chartSpec.y_label ? {
-                        display: true, text: chartSpec.y_label, color: defaults.textColor,
-                        font: { family: "'Inter'", size: 10, weight: 600 },
+                    title: (isHorizontal ? chartSpec.x_label : chartSpec.y_label) ? {
+                        display: true,
+                        text: isHorizontal ? chartSpec.x_label : chartSpec.y_label,
+                        color: defaults.textColor,
+                        font: { family: "'Inter'", size: 11, weight: 700 },
                     } : undefined,
-                    stacked: isStacked, beginAtZero: true,
+                    stacked: isStacked,
+                    beginAtZero: true,
+                },
+                [labelAxisKey]: {
+                    grid: { color: isHorizontal ? "transparent" : defaults.gridColor, drawBorder: false },
+                    ticks: {
+                        color: defaults.textColor,
+                        font: { family: "'Inter'", size: isHorizontal ? 11 : 10, weight: 500 },
+                        maxRotation: isHorizontal ? 0 : 40,
+                        autoSkip: true,
+                        maxTicksLimit: isHorizontal ? 20 : 12,
+                    },
+                    title: (isHorizontal ? chartSpec.y_label : chartSpec.x_label) ? {
+                        display: true,
+                        text: isHorizontal ? chartSpec.y_label : chartSpec.x_label,
+                        color: defaults.textColor,
+                        font: { family: "'Inter'", size: 11, weight: 700 },
+                    } : undefined,
+                    stacked: isStacked,
                 },
             };
         }
@@ -695,7 +771,9 @@
             };
         }
 
-        canvas.parentElement.style.height = "220px";
+        // Sync height with CSS: wide cards = 310px, regular = 270px
+        const isWideCard = canvas.closest(".chart-full-width") !== null;
+        canvas.parentElement.style.height = isWideCard ? "310px" : "270px";
         new Chart(canvas, config);
     }
 
