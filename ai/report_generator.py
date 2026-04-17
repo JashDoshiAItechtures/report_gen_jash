@@ -91,7 +91,7 @@ def classify_intent(question: str) -> str:
 # ── SQL Auto-Correction ────────────────────────────────────────────────────
 # The LLM persistently treats sales_order_line_pricing as if it were a
 # combined sales_order + sales_order_line table. It references columns like
-# status, so_id, product_id on the pricing table, but those columns live on
+# status, so_id, product_id on the pricing table, but those columns live on  
 # sales_order and sales_order_line respectively.
 #
 # This auto-corrector detects and rewrites these broken queries.
@@ -138,7 +138,7 @@ def _fix_report_sql(sql: str) -> str:
 
         alias = alias_match.group(1)
 
-        # Check if this alias references columns it doesn't own
+        # Check if this alias references columns it doesn't own (aliased refs)
         has_status_ref = bool(re.search(rf'\b{re.escape(alias)}\.status\b', sql_oneline, re.IGNORECASE))
         has_so_id_ref = bool(re.search(rf'\b{re.escape(alias)}\.so_id\b', sql_oneline, re.IGNORECASE))
         has_product_id_ref = bool(re.search(rf'\b{re.escape(alias)}\.product_id\b', sql_oneline, re.IGNORECASE))
@@ -147,6 +147,30 @@ def _fix_report_sql(sql: str) -> str:
         has_quantity_ref = bool(re.search(rf'\b{re.escape(alias)}\.quantity\b', sql_oneline, re.IGNORECASE))
         has_variant_sku_ref = bool(re.search(rf'\b{re.escape(alias)}\.variant_sku\b', sql_oneline, re.IGNORECASE))
         has_total_amount_ref = bool(re.search(rf'\b{re.escape(alias)}\.total_amount\b', sql_oneline, re.IGNORECASE))
+
+        # Also detect UNPREFIXED column references — the LLM sometimes writes
+        # "SELECT product_id FROM sales_order_line_pricing WHERE status = 'closed'"
+        # without any alias prefix. These bare columns are wrong if the sub-table
+        # doesn't own them.
+        is_from_table = bool(re.search(rf'\bFROM\s+{sub_tbl}\b', sql_oneline, re.IGNORECASE))
+        if is_from_table:
+            # Check for bare (unprefixed) column references
+            for col in ('status', 'order_date', 'customer_id', 'total_amount'):
+                if not has_status_ref and col == 'status' and re.search(rf'(?<!\w\.)\b{col}\b', sql_oneline, re.IGNORECASE):
+                    has_status_ref = True
+                if not has_order_date_ref and col == 'order_date' and re.search(rf'(?<!\w\.)\b{col}\b', sql_oneline, re.IGNORECASE):
+                    has_order_date_ref = True
+                if not has_customer_id_ref and col == 'customer_id' and re.search(rf'(?<!\w\.)\b{col}\b', sql_oneline, re.IGNORECASE):
+                    has_customer_id_ref = True
+                if not has_total_amount_ref and col == 'total_amount' and re.search(rf'(?<!\w\.)\b{col}\b', sql_oneline, re.IGNORECASE):
+                    has_total_amount_ref = True
+            for col in ('product_id', 'variant_sku', 'quantity'):
+                if not has_product_id_ref and col == 'product_id' and re.search(rf'(?<!\w\.)\b{col}\b', sql_oneline, re.IGNORECASE):
+                    has_product_id_ref = True
+                if not has_variant_sku_ref and col == 'variant_sku' and re.search(rf'(?<!\w\.)\b{col}\b', sql_oneline, re.IGNORECASE):
+                    has_variant_sku_ref = True
+                if not has_quantity_ref and col == 'quantity' and re.search(rf'(?<!\w\.)\b{col}\b', sql_oneline, re.IGNORECASE):
+                    has_quantity_ref = True
 
         needs_sol = has_so_id_ref or has_product_id_ref or has_quantity_ref or has_variant_sku_ref
         needs_so = has_status_ref or has_customer_id_ref or has_order_date_ref or has_total_amount_ref
@@ -263,6 +287,20 @@ def _fix_report_sql(sql: str) -> str:
                 sql_oneline, flags=re.IGNORECASE
             )
 
+        # Remap UNPREFIXED (bare) column references to correct aliases
+        # e.g., "WHERE status = 'closed'" → "WHERE so.status = 'closed'"
+        if is_from_table:
+            bare_so_cols = {'status': so_alias, 'order_date': so_alias,
+                           'customer_id': so_alias, 'total_amount': so_alias}
+            bare_sol_cols = {'product_id': sol_alias, 'variant_sku': sol_alias,
+                            'quantity': sol_alias}
+            for col, target_alias in {**bare_so_cols, **bare_sol_cols}.items():
+                # Match bare column NOT preceded by a dot (i.e., not already aliased)
+                sql_oneline = re.sub(
+                    rf'(?<!\w\.)(?<!\w)\b{col}\b(?!\s*\()',  # avoid function names
+                    f'{target_alias}.{col}',
+                    sql_oneline, flags=re.IGNORECASE
+                )
     # ══════════════════════════════════════════════════════════════════════
     # PASS 2: Fix so.product_id → sol.product_id  (product_id lives on
     #         sales_order_line, NOT sales_order)
@@ -374,6 +412,110 @@ def _fix_report_sql(sql: str) -> str:
         sql_oneline = re.sub(
             rf'\bGROUP\s+BY\s+{re.escape(_sol_alias_p4)}\.(product_id|variant_sku)\b',
             f'GROUP BY {_pm_alias}.product_name',
+            sql_oneline, flags=re.IGNORECASE
+        )
+
+    # ══════════════════════════════════════════════════════════════════════
+    # PASS 5: Fix raw customer_id used as chart label → customer_name
+    #
+    # The LLM sometimes writes:
+    #   SELECT so.customer_id, SUM(...) AS value FROM ... GROUP BY so.customer_id
+    # This produces raw IDs (C001) as labels instead of human-readable names.
+    # Fix: inject JOIN to customer_master and replace with cm.customer_name.
+    # ══════════════════════════════════════════════════════════════════════
+
+    _so_alias_m = re.search(r'\bsales_order\b(?!_)\s+(\w+)', sql_oneline, re.IGNORECASE)
+    _so_alias_p5 = _so_alias_m.group(1) if _so_alias_m else 'so'
+
+    # Check: does the SELECT clause contain <so_alias>.customer_id as a label?
+    _select_label_cid = re.search(
+        rf'\bSELECT\s+{re.escape(_so_alias_p5)}\.customer_id\b',
+        sql_oneline, re.IGNORECASE
+    )
+    # Also check for bare customer_id (no alias prefix)
+    if not _select_label_cid:
+        _select_label_cid = re.search(
+            r'\bSELECT\s+customer_id\b',
+            sql_oneline, re.IGNORECASE
+        )
+
+    if _select_label_cid:
+        logger.info("SQL auto-correct PASS 5: customer_id used as chart label — rewriting to cm.customer_name")
+
+        _has_cm = bool(re.search(r'\bcustomer_master\b', sql_oneline, re.IGNORECASE))
+        _cm_alias = 'cm'
+        if not _has_cm:
+            _inject_point = re.search(
+                r'\b(WHERE|GROUP\s+BY|ORDER\s+BY|LIMIT)\b', sql_oneline, re.IGNORECASE
+            )
+            if _inject_point:
+                pos = _inject_point.start()
+                sql_oneline = (
+                    sql_oneline[:pos]
+                    + f'JOIN customer_master {_cm_alias} ON {_so_alias_p5}.customer_id = {_cm_alias}.customer_id '
+                    + sql_oneline[pos:]
+                )
+            else:
+                sql_oneline += f' JOIN customer_master {_cm_alias} ON {_so_alias_p5}.customer_id = {_cm_alias}.customer_id'
+        else:
+            _cm_alias_m = re.search(r'\bcustomer_master\s+(\w+)', sql_oneline, re.IGNORECASE)
+            if _cm_alias_m:
+                _cm_alias = _cm_alias_m.group(1)
+
+        # Replace customer_id with customer_name in SELECT
+        sql_oneline = re.sub(
+            rf'\bSELECT\s+(?:{re.escape(_so_alias_p5)}\.)?customer_id\b',
+            f'SELECT {_cm_alias}.customer_name',
+            sql_oneline, count=1, flags=re.IGNORECASE
+        )
+        # Replace in GROUP BY
+        sql_oneline = re.sub(
+            rf'\bGROUP\s+BY\s+(?:{re.escape(_so_alias_p5)}\.)?customer_id\b',
+            f'GROUP BY {_cm_alias}.customer_name',
+            sql_oneline, flags=re.IGNORECASE
+        )
+
+    # ══════════════════════════════════════════════════════════════════════
+    # PASS 6: Fix raw vendor_id used as chart label → vendor_name
+    # ══════════════════════════════════════════════════════════════════════
+
+    _po_alias_m = re.search(r'\bpurchase_order\b(?!_)\s+(\w+)', sql_oneline, re.IGNORECASE)
+    _po_alias_p6 = _po_alias_m.group(1) if _po_alias_m else 'po'
+
+    _select_label_vid = re.search(
+        rf'\bSELECT\s+(?:{re.escape(_po_alias_p6)}\.)?vendor_id\b',
+        sql_oneline, re.IGNORECASE
+    )
+    if _select_label_vid:
+        logger.info("SQL auto-correct PASS 6: vendor_id used as chart label — rewriting to vm.vendor_name")
+        _has_vm = bool(re.search(r'\bvendor_master\b', sql_oneline, re.IGNORECASE))
+        _vm_alias = 'vm'
+        if not _has_vm:
+            _inject_point = re.search(
+                r'\b(WHERE|GROUP\s+BY|ORDER\s+BY|LIMIT)\b', sql_oneline, re.IGNORECASE
+            )
+            if _inject_point:
+                pos = _inject_point.start()
+                sql_oneline = (
+                    sql_oneline[:pos]
+                    + f'JOIN vendor_master {_vm_alias} ON {_po_alias_p6}.vendor_id = {_vm_alias}.vendor_id '
+                    + sql_oneline[pos:]
+                )
+            else:
+                sql_oneline += f' JOIN vendor_master {_vm_alias} ON {_po_alias_p6}.vendor_id = {_vm_alias}.vendor_id'
+        else:
+            _vm_alias_m = re.search(r'\bvendor_master\s+(\w+)', sql_oneline, re.IGNORECASE)
+            if _vm_alias_m:
+                _vm_alias = _vm_alias_m.group(1)
+
+        sql_oneline = re.sub(
+            rf'\bSELECT\s+(?:{re.escape(_po_alias_p6)}\.)?vendor_id\b',
+            f'SELECT {_vm_alias}.vendor_name',
+            sql_oneline, count=1, flags=re.IGNORECASE
+        )
+        sql_oneline = re.sub(
+            rf'\bGROUP\s+BY\s+(?:{re.escape(_po_alias_p6)}\.)?vendor_id\b',
+            f'GROUP BY {_vm_alias}.vendor_name',
             sql_oneline, flags=re.IGNORECASE
         )
 
@@ -877,14 +1019,115 @@ class ReportPipeline:
         table["data"] = result["data"][:200]  # Limit rows for display
         return table
 
+    def _extract_subject_lock(self, question: str, schema_str: str, profile_str: str) -> str:
+        """Dynamically extract the report subject and build a subject-locking
+        instruction that gets prepended to the LLM question.
+
+        Scans the actual schema for tables/columns matching the user's keywords
+        so the LLM knows exactly which tables to JOIN/filter.
+        """
+        q = question.lower().strip()
+
+        # Remove filter context injected by app.py (e.g. "[ACTIVE FILTERS: ...]")
+        q = re.sub(r'\[active filters:.*?\]', '', q, flags=re.IGNORECASE).strip()
+        # Remove date context injected by _build_question_with_context
+        q = re.sub(r'\[context:.*?\]', '', q, flags=re.IGNORECASE).strip()
+
+        if len(q) < 5:
+            return ""
+
+        # ── Find schema tables whose names match words in the question ──
+        # Schema format is "TABLE: table_name\n    col_name  type  nullable"
+        all_tables = re.findall(r'TABLE:\s*(\S+)', schema_str, re.IGNORECASE)
+        matching_tables = []
+        for table in all_tables:
+            # Check if any word from the table name appears in the question
+            table_words = table.lower().replace('_', ' ').split()
+            for tw in table_words:
+                if len(tw) >= 3 and tw in q and tw not in ('line', 'order', 'master', 'sales'):
+                    if table not in matching_tables:
+                        matching_tables.append(table)
+                        break
+
+        # ── Find matching column values from data profile ──
+        matching_values = []
+        if profile_str:
+            for line in profile_str.split('\n'):
+                line_lower = line.lower()
+                if 'distinct values' not in line_lower:
+                    continue
+                # Check if any significant word from the question appears
+                q_words = [w for w in q.split() if len(w) >= 3]
+                for w in q_words:
+                    if w in line_lower and w not in ('the', 'and', 'for', 'report', 'analysis', 'top'):
+                        matching_values.append(line.strip())
+                        break
+
+        # ── Build the subject lock instruction ──
+        lock = [
+            "══════════════════════════════════════════════════",
+            f"⚠ SUBJECT LOCK: \"{question.strip()}\"",
+            "══════════════════════════════════════════════════",
+            f"The user's EXACT request is: \"{question.strip()}\"",
+            "",
+            "ALL 6 KPIs, ALL 6 charts, ALL insights, and the detail table",
+            "must be EXCLUSIVELY about this subject. Every KPI label and",
+            "chart title must reference the subject. Every SQL query must",
+            "filter/scope data to ONLY this subject using appropriate",
+            "JOINs and WHERE clauses derived from the schema.",
+            "",
+            "Generic/unscoped components are FORBIDDEN. Each metric must",
+            "be qualified with the subject (e.g., 'Subject Revenue' not",
+            "'Total Revenue').",
+        ]
+
+        if matching_tables:
+            lock.append("")
+            lock.append("SCHEMA TABLES matching this subject:")
+            for t in matching_tables[:8]:
+                # Get columns for this table from schema
+                table_section = re.search(
+                    rf'TABLE:\s*{re.escape(t)}\n((?:\s+\S+.*\n)*)',
+                    schema_str, re.IGNORECASE
+                )
+                cols = ""
+                if table_section:
+                    col_lines = table_section.group(1).strip().split('\n')
+                    col_names = [cl.strip().split()[0] for cl in col_lines if cl.strip()]
+                    cols = f" → columns: {', '.join(col_names[:8])}"
+                lock.append(f"  • {t}{cols}")
+            lock.append("JOIN these tables to scope queries to the subject.")
+
+        if matching_values:
+            lock.append("")
+            lock.append("MATCHING DATA VALUES from profile:")
+            for v in matching_values[:5]:
+                lock.append(f"  • {v[:150]}")
+
+        lock.append("══════════════════════════════════════════════════")
+
+        result = "\n".join(lock)
+        logger.info("Subject lock: matching_tables=%s", matching_tables[:5])
+        return result
+
     def generate(self, question: str) -> dict[str, Any]:
         """Generate a complete report with real data."""
         schema_str = format_schema()
         rels_str = format_relationships()
         profile_str = get_data_profile()
+
+        # ── Dynamic subject extraction & enforcement ──────────────────
+        # Parse the user's question to extract the core subject, then prepend
+        # a strong subject-locking instruction so the LLM scopes EVERYTHING
+        # to what the user actually asked for.
+        subject_lock = self._extract_subject_lock(question, schema_str, profile_str)
         question_with_date = self._build_question_with_context(question)
+        if subject_lock:
+            question_with_date = subject_lock + "\n\n" + question_with_date
+            logger.info("Subject lock prepended to question (%d chars)", len(subject_lock))
 
         logger.info("Report generation — calling LLM for report blueprint")
+        logger.info("Question sent to LLM (first 500 chars): %s", question_with_date[:500])
 
         # Call LLM to generate report blueprint
         result = self.report_gen(
@@ -945,8 +1188,23 @@ class ReportPipeline:
                 # Check column count — need at least label + value
                 row_keys = list(chart["data"][0].keys()) if chart["data"] else []
                 if len(row_keys) < 2:
-                    logger.info("Removing chart '%s' — only %d columns (need 2+)", chart.get("title", "?"), len(row_keys))
-                    continue
+                    # Attempt to salvage: if it's a single-aggregate (KPI-style) result,
+                    # convert it into a displayable chart with a label column
+                    if len(row_keys) == 1 and len(chart["data"]) == 1:
+                        # Single value — convert to a bar with the chart title as label
+                        val_key = row_keys[0]
+                        chart["data"] = [{"label": chart.get("title", "Value"), val_key: chart["data"][0][val_key]}]
+                        chart["type"] = "bar"
+                        logger.info("Salvaged chart '%s' — converted single-value to bar", chart.get("title", "?"))
+                    elif len(row_keys) == 1 and len(chart["data"]) > 1:
+                        # Multiple rows but only one column — add row index as label
+                        val_key = row_keys[0]
+                        for i, row in enumerate(chart["data"]):
+                            row["label"] = f"Item {i+1}"
+                        logger.info("Salvaged chart '%s' — added index labels to %d rows", chart.get("title", "?"), len(chart["data"]))
+                    else:
+                        logger.info("Removing chart '%s' — only %d columns (need 2+)", chart.get("title", "?"), len(row_keys))
+                        continue
                 # Check if all numeric values are zero
                 value_keys = row_keys[1:]
                 all_zero = all(
@@ -1020,6 +1278,8 @@ class ReportPipeline:
         time_patterns = [
             r"^\d{4}-\d{2}$",        # 2024-01
             r"^\d{4}-\d{2}-\d{2}$",  # 2024-01-15
+            r"^\d{4}-\d{2}-\d{2}T",  # 2024-01-15T00:00:00 (ISO timestamp)
+            r"^\d{4}-\d{2}-\d{2}\s", # 2024-01-15 00:00:00
             r"^\d{4}$",              # 2024
             r"^Q[1-4]\s?\d{4}$",     # Q1 2024
             r"^\w{3,9}\s?\d{4}$",    # Jan 2024 / January 2024
@@ -1034,26 +1294,19 @@ class ReportPipeline:
             if match_count >= min(3, len(labels[:5])):
                 is_time_series = True
 
-        original_type = chart_type
-
-        # Rule 1: Time-series data → line or area (never bar/horizontalBar)
-        if is_time_series and chart_type in ("bar", "horizontalBar", "pie", "doughnut"):
-            chart["type"] = "line"
-            logger.info("Auto-fix chart '%s': %s → line (time-series detected)",
-                        chart.get("title", "?"), original_type)
-
-        # Rule 1b: Aggregate daily data → monthly when too many data points
-        if is_time_series and row_count > 30:
-            # Check if labels are daily (YYYY-MM-DD)
-            daily_pattern = r"^\d{4}-\d{2}-\d{2}"
-            daily_count = sum(1 for lbl in labels[:10] if _re.match(daily_pattern, lbl.strip()))
-            if daily_count >= min(5, len(labels[:10])):
-                # Aggregate to monthly
+        # ── Auto-clean raw timestamp labels to YYYY-MM format ─────────
+        # If labels are raw timestamps (e.g., 2025-10-01T00:00:00+00:00),
+        # clean them to YYYY-MM for readable chart axes
+        if is_time_series:
+            iso_pattern = r"^\d{4}-\d{2}-\d{2}[T\s]"
+            has_raw_timestamps = any(_re.match(iso_pattern, lbl.strip()) for lbl in labels[:3])
+            if has_raw_timestamps:
+                # Aggregate to monthly if labels are daily timestamps
                 from collections import OrderedDict
                 monthly = OrderedDict()
                 for row in data:
                     lbl = str(row.get(label_key, ""))
-                    month_key = lbl[:7]  # "2024-01-15" → "2024-01"
+                    month_key = lbl[:7]  # "2025-10-01T..." → "2025-10"
                     if month_key not in monthly:
                         monthly[month_key] = {label_key: month_key}
                         for vk in value_keys:
@@ -1064,12 +1317,19 @@ class ReportPipeline:
                         except (ValueError, TypeError):
                             pass
                 chart["data"] = list(monthly.values())
-                logger.info("Auto-fix chart '%s': aggregated %d daily → %d monthly data points",
-                            chart.get("title", "?"), row_count, len(chart["data"]))
-                # Update row_count for subsequent rules
                 data = chart["data"]
                 row_count = len(data)
                 labels = [str(row.get(label_key, "")) for row in data]
+                logger.info("Auto-clean chart '%s': cleaned timestamp labels → YYYY-MM (%d points)",
+                            chart.get("title", "?"), row_count)
+
+        original_type = chart_type
+
+        # Rule 1: Time-series data → line or area (never bar/horizontalBar)
+        if is_time_series and chart_type in ("bar", "horizontalBar", "pie", "doughnut"):
+            chart["type"] = "line"
+            logger.info("Auto-fix chart '%s': %s → line (time-series detected)",
+                        chart.get("title", "?"), original_type)
 
         # Rule 2: Too many slices for pie/doughnut → trim to top 6 + "Others"
         elif chart_type in ("pie", "doughnut") and row_count > 8 and value_keys:
@@ -1094,7 +1354,7 @@ class ReportPipeline:
                             chart.get("title", "?"), original_type)
 
         # Rule 3: Too many categories for bar → horizontalBar
-        elif chart_type == "bar" and row_count > 12:
+        elif chart_type == "bar" and row_count > 12 and not is_time_series:
             chart["type"] = "horizontalBar"
             logger.info("Auto-fix chart '%s': bar → horizontalBar (%d categories)",
                         chart.get("title", "?"), row_count)
@@ -1105,13 +1365,13 @@ class ReportPipeline:
             logger.info("Auto-fix chart '%s': horizontalBar → bar (only %d categories)",
                         chart.get("title", "?"), row_count)
 
-        # ── Rule 5: Trim excessive data rows (>15) to Top 10 ─────────
-        # For non-time-series, non-pie charts with too many categories
+        # ── Rule 5: Trim excessive NON-time-series data (>20) to Top 15 ──
+        # Only for categorical charts, never for time-series
         updated_type = chart.get("type", chart_type).lower()
         updated_count = len(chart.get("data", data))
         if (not is_time_series
-                and updated_type not in ("pie", "doughnut")
-                and updated_count > 15
+                and updated_type not in ("pie", "doughnut", "line", "area")
+                and updated_count > 20
                 and value_keys):
             first_val_key = value_keys[0]
             try:
@@ -1121,12 +1381,8 @@ class ReportPipeline:
                     key=lambda r: float(r.get(first_val_key, 0) or 0),
                     reverse=True
                 )
-                chart["data"] = sorted_data[:10]
-                chart["type"] = "horizontalBar"
-                title = chart.get("title", "")
-                if "top" not in title.lower():
-                    chart["title"] = f"Top 10 — {title}"
-                logger.info("Auto-fix chart '%s': trimmed %d → 10 rows, set horizontalBar",
+                chart["data"] = sorted_data[:15]
+                logger.info("Auto-fix chart '%s': trimmed %d → 15 rows",
                             chart.get("title", "?"), updated_count)
             except (ValueError, TypeError):
                 pass
