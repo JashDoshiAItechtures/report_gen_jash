@@ -4,6 +4,7 @@ This module adds report generation capability to the SQL chatbot without
 modifying any existing chat behaviour.
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -25,6 +26,59 @@ from db.executor import execute_sql
 logger = logging.getLogger(__name__)
 
 MAX_REPAIR_RETRIES = 2
+
+# ── Blueprint Cache ─────────────────────────────────────────────────────────
+# Caches the LLM-generated report blueprint (JSON structure with SQL queries,
+# chart types, KPI labels, etc.) keyed by a normalized hash of the user's
+# question. Same question → identical report structure every time.
+# Data values are still executed fresh from the DB.
+# Cache is persisted to disk so it survives server restarts.
+import pathlib as _pathlib
+
+_CACHE_DIR = _pathlib.Path(__file__).resolve().parent.parent / ".report_cache"
+_CACHE_FILE = _CACHE_DIR / "blueprints.json"
+
+
+def _load_blueprint_cache() -> dict[str, dict]:
+    """Load cached blueprints from disk."""
+    try:
+        if _CACHE_FILE.exists():
+            data = json.loads(_CACHE_FILE.read_text(encoding="utf-8"))
+            logger.info("Loaded %d cached report blueprints from disk", len(data))
+            return data
+    except Exception as exc:
+        logger.warning("Failed to load blueprint cache: %s", exc)
+    return {}
+
+
+def _save_blueprint_cache(cache: dict[str, dict]) -> None:
+    """Save cached blueprints to disk."""
+    try:
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        _CACHE_FILE.write_text(
+            json.dumps(cache, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        logger.warning("Failed to save blueprint cache: %s", exc)
+
+
+_blueprint_cache: dict[str, dict] = _load_blueprint_cache()
+
+# Per-key locks to prevent duplicate LLM calls when two users request
+# the same report simultaneously.  The second request waits for the
+# first LLM call to finish and then gets the cached result.
+import threading as _threading
+_cache_locks: dict[str, _threading.Lock] = {}
+_cache_locks_guard = _threading.Lock()  # protects _cache_locks dict itself
+
+
+def _get_cache_lock(key: str) -> _threading.Lock:
+    """Get or create a per-key lock for blueprint generation."""
+    with _cache_locks_guard:
+        if key not in _cache_locks:
+            _cache_locks[key] = _threading.Lock()
+        return _cache_locks[key]
 
 # ── Intent classification (deterministic — no LLM) ─────────────────────────
 
@@ -1110,43 +1164,79 @@ class ReportPipeline:
         logger.info("Subject lock: matching_tables=%s", matching_tables[:5])
         return result
 
-    def generate(self, question: str) -> dict[str, Any]:
-        """Generate a complete report with real data."""
+    @staticmethod
+    def _cache_key(question: str) -> str:
+        """Generate a deterministic cache key from the user's question.
+
+        Normalises whitespace, lowercases, strips common filler words so
+        that 'Gold product analysis' and 'gold product   analysis' hit
+        the same cache entry.
+        """
+        q = question.lower().strip()
+        # Remove injected context/filters — they change per call
+        q = re.sub(r'\[active filters:.*?\]', '', q, flags=re.IGNORECASE)
+        q = re.sub(r'\[context:.*?\]', '', q, flags=re.IGNORECASE)
+        q = re.sub(r'\s+', ' ', q).strip()
+        return hashlib.md5(q.encode()).hexdigest()
+
+    def generate(self, question: str, force_refresh: bool = False) -> dict[str, Any]:
+        """Generate a complete report with real data.
+
+        Uses a blueprint cache so the SAME question always produces the
+        SAME report structure (titles, chart types, SQL queries).  Data
+        values are re-executed fresh from the database each call.
+
+        Set force_refresh=True to bypass the cache and regenerate.
+        """
         schema_str = format_schema()
         rels_str = format_relationships()
         profile_str = get_data_profile()
 
-        # ── Dynamic subject extraction & enforcement ──────────────────
-        # Parse the user's question to extract the core subject, then prepend
-        # a strong subject-locking instruction so the LLM scopes EVERYTHING
-        # to what the user actually asked for.
-        subject_lock = self._extract_subject_lock(question, schema_str, profile_str)
-        question_with_date = self._build_question_with_context(question)
-        if subject_lock:
-            question_with_date = subject_lock + "\n\n" + question_with_date
-            logger.info("Subject lock prepended to question (%d chars)", len(subject_lock))
+        cache_key = self._cache_key(question)
 
-        logger.info("Report generation — calling LLM for report blueprint")
-        logger.info("Question sent to LLM (first 500 chars): %s", question_with_date[:500])
+        # ── Per-key lock: prevents duplicate LLM calls when two users
+        #    request the same report simultaneously ─────────────────────
+        lock = _get_cache_lock(cache_key)
+        with lock:
+            # ── Check blueprint cache first ───────────────────────────
+            if not force_refresh and cache_key in _blueprint_cache:
+                logger.info("Blueprint cache HIT for key %s — reusing cached structure", cache_key[:8])
+                report = json.loads(json.dumps(_blueprint_cache[cache_key]))  # deep copy
+            else:
+                # ── Dynamic subject extraction & enforcement ──────────
+                subject_lock = self._extract_subject_lock(question, schema_str, profile_str)
+                question_with_date = self._build_question_with_context(question)
+                if subject_lock:
+                    question_with_date = subject_lock + "\n\n" + question_with_date
+                    logger.info("Subject lock prepended to question (%d chars)", len(subject_lock))
 
-        # Call LLM to generate report blueprint
-        result = self.report_gen(
-            question=question_with_date,
-            schema_info=schema_str,
-            relationships=rels_str,
-            data_profile=profile_str,
-        )
+                logger.info("Report generation — calling LLM for report blueprint (cache MISS)")
+                logger.info("Question sent to LLM (first 500 chars): %s", question_with_date[:500])
 
-        # Parse the JSON output
-        try:
-            report = self._extract_json(result.report_json)
-        except (json.JSONDecodeError, ValueError) as exc:
-            logger.error("Failed to parse report JSON: %s", exc)
-            return {
-                "mode": "report",
-                "error": f"Failed to generate report structure: {str(exc)}",
-                "report": None,
-            }
+                # Call LLM to generate report blueprint
+                result = self.report_gen(
+                    question=question_with_date,
+                    schema_info=schema_str,
+                    relationships=rels_str,
+                    data_profile=profile_str,
+                )
+
+                # Parse the JSON output
+                try:
+                    report = self._extract_json(result.report_json)
+                except (json.JSONDecodeError, ValueError) as exc:
+                    logger.error("Failed to parse report JSON: %s", exc)
+                    return {
+                        "mode": "report",
+                        "error": f"Failed to generate report structure: {str(exc)}",
+                        "report": None,
+                    }
+
+                # ── Store blueprint in cache (structure only, no data)
+                _blueprint_cache[cache_key] = json.loads(json.dumps(report))
+                _save_blueprint_cache(_blueprint_cache)
+                logger.info("Blueprint cached with key %s (%d entries total)",
+                            cache_key[:8], len(_blueprint_cache))
 
         logger.info("Report blueprint received — executing SQL queries")
 

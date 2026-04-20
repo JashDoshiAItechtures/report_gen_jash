@@ -96,6 +96,7 @@ class ReportRequest(BaseModel):
     question: str
     provider: str = "groq"
     conversation_id: str | None = None
+    force_refresh: bool = False  # bypass cache for fresh report
     # Filters
     date_from: str | None = None
     date_to: str | None = None
@@ -268,7 +269,7 @@ def report_endpoint(req: ReportRequest):
 
     logger.info("REPORT request | question=%s | filters=%s", req.question, filter_ctx or "none")
     pipeline = ReportPipeline(provider=req.provider)
-    return pipeline.generate(question_with_filters)
+    return pipeline.generate(question_with_filters, force_refresh=req.force_refresh)
 
 
 @app.post("/report/apply-filters")

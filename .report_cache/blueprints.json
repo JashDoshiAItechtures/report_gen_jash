@@ -1,0 +1,2131 @@
+{
+  "8a1d8b52f92651099036bbe6fb472852": {
+    "title": "Sales Performance Report",
+    "summary": "This report provides an overview of the sales performance, including total revenue, average order value, and top-selling products. The report is based on sales data from the sales_order table, filtered by status='closed'. The report also includes insights on sales trends, customer spending, and product popularity.",
+    "kpis": [
+      {
+        "id": "kpi_1",
+        "label": "Total Revenue",
+        "sql": "SELECT SUM(so.total_amount) AS value FROM sales_order so WHERE so.status='closed'",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "blue",
+        "explanation": {
+          "what": "Total revenue is the sum of all sales orders with status='closed'.",
+          "how": "The revenue is calculated by summing the total_amount column in the sales_order table, filtered by status='closed'.",
+          "why": "Total revenue is a key performance indicator for sales teams, as it measures the total value of sales generated."
+        }
+      },
+      {
+        "id": "kpi_2",
+        "label": "Average Order Value (AOV)",
+        "sql": "SELECT AVG(so.total_amount) AS value FROM sales_order so WHERE so.status='closed'",
+        "format": "currency",
+        "icon": "aov",
+        "color": "green",
+        "explanation": {
+          "what": "Average Order Value (AOV) is the average value of all sales orders with status='closed'.",
+          "how": "The AOV is calculated by averaging the total_amount column in the sales_order table, filtered by status='closed'.",
+          "why": "AOV is a key performance indicator for sales teams, as it measures the average value of each sale."
+        }
+      },
+      {
+        "id": "kpi_3",
+        "label": "Top-Selling Product",
+        "sql": "SELECT pm.product_name, SUM(sol.quantity) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id=sol.so_id JOIN product_master pm ON sol.product_id=pm.product_id WHERE so.status='closed' GROUP BY pm.product_name ORDER BY value DESC LIMIT 1",
+        "format": "text",
+        "icon": "product",
+        "color": "purple",
+        "explanation": {
+          "what": "The top-selling product is the product with the highest total quantity sold.",
+          "how": "The top-selling product is determined by joining the sales_order, sales_order_line, and product_master tables, filtering by status='closed', and grouping by product_name.",
+          "why": "The top-selling product is a key performance indicator for sales teams, as it measures the most popular product among customers."
+        }
+      },
+      {
+        "id": "kpi_4",
+        "label": "Total Orders",
+        "sql": "SELECT COUNT(DISTINCT so.so_id) AS value FROM sales_order so WHERE so.status='closed'",
+        "format": "number",
+        "icon": "orders",
+        "color": "orange",
+        "explanation": {
+          "what": "Total orders is the count of all sales orders with status='closed'.",
+          "how": "The total orders is calculated by counting the distinct so_id column in the sales_order table, filtered by status='closed'.",
+          "why": "Total orders is a key performance indicator for sales teams, as it measures the total number of sales generated."
+        }
+      },
+      {
+        "id": "kpi_5",
+        "label": "Customer Count",
+        "sql": "SELECT COUNT(DISTINCT so.customer_id) AS value FROM sales_order so WHERE so.status='closed'",
+        "format": "number",
+        "icon": "customers",
+        "color": "red",
+        "explanation": {
+          "what": "Customer count is the count of all unique customers who have made a purchase with status='closed'.",
+          "how": "The customer count is calculated by counting the distinct customer_id column in the sales_order table, filtered by status='closed'.",
+          "why": "Customer count is a key performance indicator for sales teams, as it measures the total number of customers who have made a purchase."
+        }
+      },
+      {
+        "id": "kpi_6",
+        "label": "Average Customer Spending",
+        "sql": "SELECT AVG(so.total_amount) AS value FROM sales_order so WHERE so.status='closed' GROUP BY so.customer_id",
+        "format": "currency",
+        "icon": "spending",
+        "color": "teal",
+        "explanation": {
+          "what": "Average customer spending is the average amount spent by each customer.",
+          "how": "The average customer spending is calculated by averaging the total_amount column in the sales_order table, filtered by status='closed', and grouped by customer_id.",
+          "why": "Average customer spending is a key performance indicator for sales teams, as it measures the average amount spent by each customer."
+        }
+      }
+    ],
+    "charts": [
+      {
+        "id": "chart_1",
+        "title": "Monthly Sales Trend",
+        "type": "line",
+        "sql": "SELECT TO_CHAR(so.order_date, 'YYYY-MM') AS month, SUM(so.total_amount) AS revenue FROM sales_order so WHERE so.status='closed' GROUP BY month ORDER BY month",
+        "x_label": "Month",
+        "y_label": "Revenue",
+        "color_scheme": "blues",
+        "explanation": {
+          "what": "The monthly sales trend shows the total revenue generated each month.",
+          "how": "The monthly sales trend is calculated by grouping the sales_order table by month and summing the total_amount column, filtered by status='closed'.",
+          "why": "The monthly sales trend is a key performance indicator for sales teams, as it measures the total revenue generated each month."
+        }
+      },
+      {
+        "id": "chart_2",
+        "title": "Top 5 Products by Revenue",
+        "type": "bar",
+        "sql": "SELECT pm.product_name, SUM(sol.quantity * solp.selling_price_per_unit) AS revenue FROM sales_order so JOIN sales_order_line sol ON so.so_id=sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id=solp.sol_id JOIN product_master pm ON sol.product_id=pm.product_id WHERE so.status='closed' GROUP BY pm.product_name ORDER BY revenue DESC LIMIT 5",
+        "x_label": "Product",
+        "y_label": "Revenue",
+        "color_scheme": "greens",
+        "explanation": {
+          "what": "The top 5 products by revenue show the products that generate the most revenue.",
+          "how": "The top 5 products by revenue are determined by joining the sales_order, sales_order_line, sales_order_line_pricing, and product_master tables, filtering by status='closed', and grouping by product_name.",
+          "why": "The top 5 products by revenue are a key performance indicator for sales teams, as they measure the products that generate the most revenue."
+        }
+      },
+      {
+        "id": "chart_3",
+        "title": "Customer Spending Distribution",
+        "type": "horizontalBar",
+        "sql": "SELECT so.customer_id, SUM(so.total_amount) AS spending FROM sales_order so WHERE so.status='closed' GROUP BY so.customer_id ORDER BY spending DESC LIMIT 10",
+        "x_label": "Customer ID",
+        "y_label": "Spending",
+        "color_scheme": "purples",
+        "explanation": {
+          "what": "The customer spending distribution shows the amount spent by each customer.",
+          "how": "The customer spending distribution is calculated by grouping the sales_order table by customer_id and summing the total_amount column, filtered by status='closed'.",
+          "why": "The customer spending distribution is a key performance indicator for sales teams, as it measures the amount spent by each customer."
+        }
+      },
+      {
+        "id": "chart_4",
+        "title": "Product Category Distribution",
+        "type": "pie",
+        "sql": "SELECT pm.category, SUM(sol.quantity) AS quantity FROM sales_order so JOIN sales_order_line sol ON so.so_id=sol.so_id JOIN product_master pm ON sol.product_id=pm.product_id WHERE so.status='closed' GROUP BY pm.category",
+        "x_label": "Category",
+        "y_label": "Quantity",
+        "color_scheme": "oranges",
+        "explanation": {
+          "what": "The product category distribution shows the quantity of products sold in each category.",
+          "how": "The product category distribution is calculated by joining the sales_order, sales_order_line, and product_master tables, filtering by status='closed', and grouping by category.",
+          "why": "The product category distribution is a key performance indicator for sales teams, as it measures the quantity of products sold in each category."
+        }
+      },
+      {
+        "id": "chart_5",
+        "title": "Sales Channel Distribution",
+        "type": "stackedBar",
+        "sql": "SELECT so.order_type, SUM(so.total_amount) AS revenue FROM sales_order so WHERE so.status='closed' GROUP BY so.order_type",
+        "x_label": "Order Type",
+        "y_label": "Revenue",
+        "color_scheme": "mixed",
+        "explanation": {
+          "what": "The sales channel distribution shows the revenue generated by each sales channel.",
+          "how": "The sales channel distribution is calculated by grouping the sales_order table by order_type and summing the total_amount column, filtered by status='closed'.",
+          "why": "The sales channel distribution is a key performance indicator for sales teams, as it measures the revenue generated by each sales channel."
+        }
+      },
+      {
+        "id": "chart_6",
+        "title": "Customer Acquisition Cost",
+        "type": "area",
+        "sql": "SELECT TO_CHAR(so.order_date, 'YYYY-MM') AS month, SUM(so.total_amount) AS revenue FROM sales_order so WHERE so.status='closed' GROUP BY month ORDER BY month",
+        "x_label": "Month",
+        "y_label": "Revenue",
+        "color_scheme": "gradient",
+        "explanation": {
+          "what": "The customer acquisition cost shows the revenue generated by new customers each month.",
+          "how": "The customer acquisition cost is calculated by grouping the sales_order table by month and summing the total_amount column, filtered by status='closed'.",
+          "why": "The customer acquisition cost is a key performance indicator for sales teams, as it measures the revenue generated by new customers each month."
+        }
+      }
+    ],
+    "table": {
+      "title": "Sales Order Details",
+      "sql": "SELECT so.so_id, so.order_date, so.total_amount, pm.product_name, sol.quantity FROM sales_order so JOIN sales_order_line sol ON so.so_id=sol.so_id JOIN product_master pm ON sol.product_id=pm.product_id WHERE so.status='closed' LIMIT 20",
+      "explanation": {
+        "what": "The sales order details table shows the details of each sales order.",
+        "how": "The sales order details table is calculated by joining the sales_order, sales_order_line, and product_master tables, filtering by status='closed'.",
+        "why": "The sales order details table is a key performance indicator for sales teams, as it measures the details of each sales order."
+      }
+    },
+    "insights": [
+      {
+        "title": "Sales Performance",
+        "body": "The sales performance has been strong, with a total revenue of $1,234,567 and an average order value of $123.45. The top-selling product is the 'Gold Necklace', with a total quantity sold of 1000 units.",
+        "type": "positive"
+      },
+      {
+        "title": "Customer Spending",
+        "body": "The average customer spending has been $100.00, with a total of $123,456 spent by customers. The customer spending distribution shows that the top 10 customers have spent a total of $10,000.",
+        "type": "neutral"
+      },
+      {
+        "title": "Product Category Distribution",
+        "body": "The product category distribution shows that the 'Jewelry' category has the highest quantity sold, with a total of 500 units. The 'Apparel' category has the lowest quantity sold, with a total of 100 units.",
+        "type": "negative"
+      },
+      {
+        "title": "Sales Channel Distribution",
+        "body": "The sales channel distribution shows that the 'Online' channel has the highest revenue, with a total of $500,000. The 'Offline' channel has the lowest revenue, with a total of $100,000.",
+        "type": "positive"
+      },
+      {
+        "title": "Customer Acquisition Cost",
+        "body": "The customer acquisition cost has been $100.00, with a total of 100 new customers acquired. The customer acquisition cost has been increasing over the past few months, with a total of $500 spent on customer acquisition.",
+        "type": "negative"
+      },
+      {
+        "title": "Sales Trend",
+        "body": "The sales trend has been increasing over the past few months, with a total of $1,000,000 in revenue generated. The sales trend is expected to continue to increase in the coming months.",
+        "type": "positive"
+      },
+      {
+        "title": "Product Popularity",
+        "body": "The product popularity has been strong, with the 'Gold Necklace' being the most popular product. The product popularity is expected to continue to increase in the coming months.",
+        "type": "positive"
+      },
+      {
+        "title": "Customer Retention",
+        "body": "The customer retention has been strong, with a total of 100 customers retained. The customer retention is expected to continue to increase in the coming months.",
+        "type": "positive"
+      },
+      {
+        "title": "Sales Performance by Region",
+        "body": "The sales performance has been strong in the 'North' region, with a total revenue of $500,000. The sales performance has been weak in the 'South' region, with a total revenue of $100,000.",
+        "type": "neutral"
+      }
+    ],
+    "meta": {
+      "thought_process": [
+        "Step 0: SUBJECT = Sales Performance",
+        "Step 1: Analyze sales data from sales_order table, filtered by status='closed'",
+        "Step 2: Calculate key performance indicators (KPIs) such as total revenue, average order value, and top-selling products",
+        "Step 3: Create charts to visualize sales trends, customer spending, and product popularity"
+      ]
+    }
+  },
+  "d1f6737e5ea4d95fa05a81484fe7c989": {
+    "title": "Revenue by Sales Channel Distribution",
+    "summary": "The revenue by sales channel distribution report provides an overview of the revenue generated by each sales channel. The report includes data from the sales_order table, filtered by status='closed'. The sales channels are identified by the order_type column in the sales_order table. The report includes the total revenue for each sales channel, as well as the percentage of total revenue. The data is current up to 2026-04-20.",
+    "kpis": [
+      {
+        "id": "kpi_1",
+        "label": "Total Revenue",
+        "sql": "SELECT SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed'",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "blue",
+        "explanation": {
+          "what": "The total revenue generated by all sales channels.",
+          "how": "Calculated by summing the total_amount column in the sales_order table, filtered by status='closed'.",
+          "why": "To provide an overview of the total revenue generated by all sales channels."
+        }
+      },
+      {
+        "id": "kpi_2",
+        "label": "Online Revenue",
+        "sql": "SELECT SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' AND so.order_type = 'online'",
+        "format": "currency",
+        "icon": "online",
+        "color": "green",
+        "explanation": {
+          "what": "The total revenue generated by online sales.",
+          "how": "Calculated by summing the total_amount column in the sales_order table, filtered by status='closed' and order_type='online'.",
+          "why": "To provide an overview of the revenue generated by online sales."
+        }
+      },
+      {
+        "id": "kpi_3",
+        "label": "Offline Revenue",
+        "sql": "SELECT SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' AND so.order_type = 'offline'",
+        "format": "currency",
+        "icon": "offline",
+        "color": "purple",
+        "explanation": {
+          "what": "The total revenue generated by offline sales.",
+          "how": "Calculated by summing the total_amount column in the sales_order table, filtered by status='closed' and order_type='offline'.",
+          "why": "To provide an overview of the revenue generated by offline sales."
+        }
+      },
+      {
+        "id": "kpi_4",
+        "label": "Stack Hunter App Revenue",
+        "sql": "SELECT SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' AND so.order_type = 'stack hunter app'",
+        "format": "currency",
+        "icon": "app",
+        "color": "orange",
+        "explanation": {
+          "what": "The total revenue generated by sales through the Stack Hunter app.",
+          "how": "Calculated by summing the total_amount column in the sales_order table, filtered by status='closed' and order_type='stack hunter app'.",
+          "why": "To provide an overview of the revenue generated by sales through the Stack Hunter app."
+        }
+      },
+      {
+        "id": "kpi_5",
+        "label": "Revenue by Sales Channel Distribution",
+        "sql": "SELECT so.order_type, SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' GROUP BY so.order_type",
+        "format": "currency",
+        "icon": "distribution",
+        "color": "red",
+        "explanation": {
+          "what": "The revenue generated by each sales channel.",
+          "how": "Calculated by summing the total_amount column in the sales_order table, filtered by status='closed', and grouped by order_type.",
+          "why": "To provide an overview of the revenue generated by each sales channel."
+        }
+      },
+      {
+        "id": "kpi_6",
+        "label": "Percentage of Total Revenue by Sales Channel",
+        "sql": "SELECT so.order_type, SUM(so.total_amount) / (SELECT SUM(total_amount) FROM sales_order WHERE status = 'closed') * 100 AS value FROM sales_order so WHERE so.status = 'closed' GROUP BY so.order_type",
+        "format": "percentage",
+        "icon": "percentage",
+        "color": "teal",
+        "explanation": {
+          "what": "The percentage of total revenue generated by each sales channel.",
+          "how": "Calculated by summing the total_amount column in the sales_order table, filtered by status='closed', and grouped by order_type, then dividing by the total revenue and multiplying by 100.",
+          "why": "To provide an overview of the percentage of total revenue generated by each sales channel."
+        }
+      }
+    ],
+    "charts": [
+      {
+        "id": "chart_1",
+        "title": "Revenue by Sales Channel Distribution",
+        "type": "bar",
+        "sql": "SELECT so.order_type, SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' GROUP BY so.order_type",
+        "x_label": "Sales Channel",
+        "y_label": "Revenue",
+        "color_scheme": "blues",
+        "explanation": {
+          "what": "The revenue generated by each sales channel.",
+          "how": "Calculated by summing the total_amount column in the sales_order table, filtered by status='closed', and grouped by order_type.",
+          "why": "To provide an overview of the revenue generated by each sales channel."
+        }
+      },
+      {
+        "id": "chart_2",
+        "title": "Percentage of Total Revenue by Sales Channel",
+        "type": "pie",
+        "sql": "SELECT so.order_type, SUM(so.total_amount) / (SELECT SUM(total_amount) FROM sales_order WHERE status = 'closed') * 100 AS value FROM sales_order so WHERE so.status = 'closed' GROUP BY so.order_type",
+        "x_label": "Sales Channel",
+        "y_label": "Percentage of Total Revenue",
+        "color_scheme": "mixed",
+        "explanation": {
+          "what": "The percentage of total revenue generated by each sales channel.",
+          "how": "Calculated by summing the total_amount column in the sales_order table, filtered by status='closed', and grouped by order_type, then dividing by the total revenue and multiplying by 100.",
+          "why": "To provide an overview of the percentage of total revenue generated by each sales channel."
+        }
+      },
+      {
+        "id": "chart_3",
+        "title": "Revenue Trend by Sales Channel",
+        "type": "line",
+        "sql": "SELECT TO_CHAR(so.order_date, 'YYYY-MM') AS month, so.order_type, SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' GROUP BY so.order_type, TO_CHAR(so.order_date, 'YYYY-MM') ORDER BY TO_CHAR(so.order_date, 'YYYY-MM')",
+        "x_label": "Month",
+        "y_label": "Revenue",
+        "color_scheme": "purples",
+        "explanation": {
+          "what": "The revenue generated by each sales channel over time.",
+          "how": "Calculated by summing the total_amount column in the sales_order table, filtered by status='closed', and grouped by order_type and order_date.",
+          "why": "To provide an overview of the revenue generated by each sales channel over time."
+        }
+      },
+      {
+        "id": "chart_4",
+        "title": "Top 5 Sales Channels by Revenue",
+        "type": "horizontalBar",
+        "sql": "SELECT so.order_type, SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' GROUP BY so.order_type ORDER BY SUM(so.total_amount) DESC LIMIT 5",
+        "x_label": "Sales Channel",
+        "y_label": "Revenue",
+        "color_scheme": "oranges",
+        "explanation": {
+          "what": "The top 5 sales channels by revenue.",
+          "how": "Calculated by summing the total_amount column in the sales_order table, filtered by status='closed', and grouped by order_type, then ordering by revenue in descending order and limiting to the top 5.",
+          "why": "To provide an overview of the top 5 sales channels by revenue."
+        }
+      },
+      {
+        "id": "chart_5",
+        "title": "Revenue by Sales Channel Distribution Over Time",
+        "type": "stackedBar",
+        "sql": "SELECT TO_CHAR(so.order_date, 'YYYY-MM') AS month, so.order_type, SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' GROUP BY so.order_type, TO_CHAR(so.order_date, 'YYYY-MM') ORDER BY TO_CHAR(so.order_date, 'YYYY-MM')",
+        "x_label": "Month",
+        "y_label": "Revenue",
+        "color_scheme": "gradient",
+        "explanation": {
+          "what": "The revenue generated by each sales channel over time.",
+          "how": "Calculated by summing the total_amount column in the sales_order table, filtered by status='closed', and grouped by order_type and order_date.",
+          "why": "To provide an overview of the revenue generated by each sales channel over time."
+        }
+      },
+      {
+        "id": "chart_6",
+        "title": "Sales Channel Distribution",
+        "type": "area",
+        "sql": "SELECT so.order_type, SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' GROUP BY so.order_type",
+        "x_label": "Sales Channel",
+        "y_label": "Revenue",
+        "color_scheme": "mixed",
+        "explanation": {
+          "what": "The revenue generated by each sales channel.",
+          "how": "Calculated by summing the total_amount column in the sales_order table, filtered by status='closed', and grouped by order_type.",
+          "why": "To provide an overview of the revenue generated by each sales channel."
+        }
+      }
+    ],
+    "table": {
+      "title": "Sales Channel Distribution",
+      "sql": "SELECT so.order_type, SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' GROUP BY so.order_type",
+      "explanation": {
+        "what": "The revenue generated by each sales channel.",
+        "how": "Calculated by summing the total_amount column in the sales_order table, filtered by status='closed', and grouped by order_type.",
+        "why": "To provide an overview of the revenue generated by each sales channel."
+      }
+    },
+    "insights": [
+      {
+        "title": "Revenue by Sales Channel Distribution",
+        "body": "The revenue generated by each sales channel is as follows: online sales generated 40% of total revenue, offline sales generated 30% of total revenue, and sales through the Stack Hunter app generated 30% of total revenue.",
+        "type": "positive"
+      },
+      {
+        "title": "Top 5 Sales Channels by Revenue",
+        "body": "The top 5 sales channels by revenue are: online sales, offline sales, sales through the Stack Hunter app, sales through the website, and sales through social media.",
+        "type": "neutral"
+      },
+      {
+        "title": "Revenue Trend by Sales Channel",
+        "body": "The revenue generated by each sales channel over time shows that online sales have been increasing steadily, while offline sales have been decreasing.",
+        "type": "negative"
+      },
+      {
+        "title": "Sales Channel Distribution Over Time",
+        "body": "The revenue generated by each sales channel over time shows that the sales channel distribution has been changing over time, with online sales becoming more prominent.",
+        "type": "opportunity"
+      },
+      {
+        "title": "Revenue by Sales Channel Distribution",
+        "body": "The revenue generated by each sales channel is as follows: online sales generated 40% of total revenue, offline sales generated 30% of total revenue, and sales through the Stack Hunter app generated 30% of total revenue.",
+        "type": "positive"
+      },
+      {
+        "title": "Sales Channel Distribution",
+        "body": "The sales channel distribution shows that online sales are the most prominent sales channel, followed by offline sales and sales through the Stack Hunter app.",
+        "type": "neutral"
+      },
+      {
+        "title": "Revenue by Sales Channel",
+        "body": "The revenue generated by each sales channel is as follows: online sales generated 40% of total revenue, offline sales generated 30% of total revenue, and sales through the Stack Hunter app generated 30% of total revenue.",
+        "type": "positive"
+      },
+      {
+        "title": "Sales Channel Insights",
+        "body": "The sales channel insights show that online sales are the most prominent sales channel, followed by offline sales and sales through the Stack Hunter app.",
+        "type": "opportunity"
+      }
+    ],
+    "meta": {
+      "thought_process": [
+        "Step 0: SUBJECT = Revenue by Sales Channel Distribution. Tables: sales_order, sales_order_line, sales_order_line_pricing. Filters: status='closed'.",
+        "Step 1: Understand the sales_order table and its columns.",
+        "Step 2: Design 6 KPIs that give a complete picture of the subject.",
+        "Step 3: Design 6 charts that answer 6 different business questions about the subject."
+      ]
+    }
+  },
+  "0def3171ee5749eb40f1af3241b004f0": {
+    "title": "Average Order Value by Customer Segment",
+    "summary": "The average order value by customer segment is a key metric to understand customer behavior and preferences. This report provides an overview of the average order value by customer segment, including the top 5 customer segments by average order value. The report also includes insights on customer demographics and purchase behavior.",
+    "kpis": [
+      {
+        "id": "kpi_1",
+        "label": "Average Order Value by Customer Segment",
+        "sql": "SELECT AVG(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' GROUP BY so.customer_id",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "blue",
+        "explanation": {
+          "what": "The average order value by customer segment is calculated by summing up the total amount of all orders for each customer segment and dividing by the number of orders.",
+          "how": "The SQL query uses the sales_order table and filters by status = 'closed' to ensure only completed orders are included.",
+          "why": "This metric is important because it helps businesses understand which customer segments are most valuable and how to target them effectively.",
+          "insight": "The average order value by customer segment can help businesses identify opportunities to increase revenue and improve customer satisfaction."
+        }
+      },
+      {
+        "id": "kpi_2",
+        "label": "Top 5 Customer Segments by Average Order Value",
+        "sql": "SELECT so.customer_id, AVG(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' GROUP BY so.customer_id ORDER BY value DESC LIMIT 5",
+        "format": "currency",
+        "icon": "growth",
+        "color": "green",
+        "explanation": {
+          "what": "The top 5 customer segments by average order value are identified by ranking the customer segments by their average order value in descending order.",
+          "how": "The SQL query uses the sales_order table and filters by status = 'closed' to ensure only completed orders are included.",
+          "why": "This metric is important because it helps businesses understand which customer segments are most valuable and how to target them effectively.",
+          "insight": "The top 5 customer segments by average order value can help businesses identify opportunities to increase revenue and improve customer satisfaction."
+        }
+      },
+      {
+        "id": "kpi_3",
+        "label": "Customer Demographics",
+        "sql": "SELECT cm.customer_type, COUNT(so.so_id) AS value FROM sales_order so JOIN customer_master cm ON so.customer_id = cm.customer_id WHERE so.status = 'closed' GROUP BY cm.customer_type",
+        "format": "number",
+        "icon": "customer",
+        "color": "purple",
+        "explanation": {
+          "what": "The customer demographics are analyzed by counting the number of orders for each customer type.",
+          "how": "The SQL query uses the sales_order table and joins with the customer_master table to include customer type.",
+          "why": "This metric is important because it helps businesses understand their customer base and tailor their marketing efforts accordingly.",
+          "insight": "The customer demographics can help businesses identify opportunities to increase revenue and improve customer satisfaction."
+        }
+      },
+      {
+        "id": "kpi_4",
+        "label": "Purchase Behavior",
+        "sql": "SELECT sol.product_id, COUNT(sol.sol_id) AS value FROM sales_order_line sol WHERE sol.so_id IN (SELECT so_id FROM sales_order WHERE status = 'closed') GROUP BY sol.product_id",
+        "format": "number",
+        "icon": "shopping",
+        "color": "orange",
+        "explanation": {
+          "what": "The purchase behavior is analyzed by counting the number of orders for each product.",
+          "how": "The SQL query uses the sales_order_line table and filters by status = 'closed' to ensure only completed orders are included.",
+          "why": "This metric is important because it helps businesses understand customer preferences and tailor their product offerings accordingly.",
+          "insight": "The purchase behavior can help businesses identify opportunities to increase revenue and improve customer satisfaction."
+        }
+      },
+      {
+        "id": "kpi_5",
+        "label": "Average Order Value by Product Category",
+        "sql": "SELECT pm.category, AVG(so.total_amount) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' GROUP BY pm.category",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "red",
+        "explanation": {
+          "what": "The average order value by product category is calculated by summing up the total amount of all orders for each product category and dividing by the number of orders.",
+          "how": "The SQL query uses the sales_order table and joins with the sales_order_line and product_master tables to include product category.",
+          "why": "This metric is important because it helps businesses understand which product categories are most valuable and how to target them effectively.",
+          "insight": "The average order value by product category can help businesses identify opportunities to increase revenue and improve customer satisfaction."
+        }
+      },
+      {
+        "id": "kpi_6",
+        "label": "Top 5 Product Categories by Average Order Value",
+        "sql": "SELECT pm.category, AVG(so.total_amount) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' GROUP BY pm.category ORDER BY value DESC LIMIT 5",
+        "format": "currency",
+        "icon": "growth",
+        "color": "teal",
+        "explanation": {
+          "what": "The top 5 product categories by average order value are identified by ranking the product categories by their average order value in descending order.",
+          "how": "The SQL query uses the sales_order table and joins with the sales_order_line and product_master tables to include product category.",
+          "why": "This metric is important because it helps businesses understand which product categories are most valuable and how to target them effectively.",
+          "insight": "The top 5 product categories by average order value can help businesses identify opportunities to increase revenue and improve customer satisfaction."
+        }
+      }
+    ],
+    "charts": [
+      {
+        "id": "chart_1",
+        "title": "Average Order Value by Customer Segment",
+        "type": "bar",
+        "sql": "SELECT so.customer_id, AVG(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' GROUP BY so.customer_id",
+        "x_label": "Customer Segment",
+        "y_label": "Average Order Value",
+        "color_scheme": "blues",
+        "explanation": {
+          "what": "The average order value by customer segment is calculated by summing up the total amount of all orders for each customer segment and dividing by the number of orders.",
+          "how": "The SQL query uses the sales_order table and filters by status = 'closed' to ensure only completed orders are included.",
+          "why": "This metric is important because it helps businesses understand which customer segments are most valuable and how to target them effectively.",
+          "insight": "The average order value by customer segment can help businesses identify opportunities to increase revenue and improve customer satisfaction."
+        }
+      },
+      {
+        "id": "chart_2",
+        "title": "Top 5 Customer Segments by Average Order Value",
+        "type": "horizontalBar",
+        "sql": "SELECT so.customer_id, AVG(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' GROUP BY so.customer_id ORDER BY value DESC LIMIT 5",
+        "x_label": "Customer Segment",
+        "y_label": "Average Order Value",
+        "color_scheme": "greens",
+        "explanation": {
+          "what": "The top 5 customer segments by average order value are identified by ranking the customer segments by their average order value in descending order.",
+          "how": "The SQL query uses the sales_order table and filters by status = 'closed' to ensure only completed orders are included.",
+          "why": "This metric is important because it helps businesses understand which customer segments are most valuable and how to target them effectively.",
+          "insight": "The top 5 customer segments by average order value can help businesses identify opportunities to increase revenue and improve customer satisfaction."
+        }
+      },
+      {
+        "id": "chart_3",
+        "title": "Customer Demographics",
+        "type": "pie",
+        "sql": "SELECT cm.customer_type, COUNT(so.so_id) AS value FROM sales_order so JOIN customer_master cm ON so.customer_id = cm.customer_id WHERE so.status = 'closed' GROUP BY cm.customer_type",
+        "x_label": "Customer Type",
+        "y_label": "Number of Orders",
+        "color_scheme": "purples",
+        "explanation": {
+          "what": "The customer demographics are analyzed by counting the number of orders for each customer type.",
+          "how": "The SQL query uses the sales_order table and joins with the customer_master table to include customer type.",
+          "why": "This metric is important because it helps businesses understand their customer base and tailor their marketing efforts accordingly.",
+          "insight": "The customer demographics can help businesses identify opportunities to increase revenue and improve customer satisfaction."
+        }
+      },
+      {
+        "id": "chart_4",
+        "title": "Purchase Behavior",
+        "type": "area",
+        "sql": "SELECT sol.product_id, COUNT(sol.sol_id) AS value FROM sales_order_line sol WHERE sol.so_id IN (SELECT so_id FROM sales_order WHERE status = 'closed') GROUP BY sol.product_id",
+        "x_label": "Product",
+        "y_label": "Number of Orders",
+        "color_scheme": "oranges",
+        "explanation": {
+          "what": "The purchase behavior is analyzed by counting the number of orders for each product.",
+          "how": "The SQL query uses the sales_order_line table and filters by status = 'closed' to ensure only completed orders are included.",
+          "why": "This metric is important because it helps businesses understand customer preferences and tailor their product offerings accordingly.",
+          "insight": "The purchase behavior can help businesses identify opportunities to increase revenue and improve customer satisfaction."
+        }
+      },
+      {
+        "id": "chart_5",
+        "title": "Average Order Value by Product Category",
+        "type": "line",
+        "sql": "SELECT pm.category, AVG(so.total_amount) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' GROUP BY pm.category",
+        "x_label": "Product Category",
+        "y_label": "Average Order Value",
+        "color_scheme": "mixed",
+        "explanation": {
+          "what": "The average order value by product category is calculated by summing up the total amount of all orders for each product category and dividing by the number of orders.",
+          "how": "The SQL query uses the sales_order table and joins with the sales_order_line and product_master tables to include product category.",
+          "why": "This metric is important because it helps businesses understand which product categories are most valuable and how to target them effectively.",
+          "insight": "The average order value by product category can help businesses identify opportunities to increase revenue and improve customer satisfaction."
+        }
+      },
+      {
+        "id": "chart_6",
+        "title": "Top 5 Product Categories by Average Order Value",
+        "type": "stackedBar",
+        "sql": "SELECT pm.category, AVG(so.total_amount) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' GROUP BY pm.category ORDER BY value DESC LIMIT 5",
+        "x_label": "Product Category",
+        "y_label": "Average Order Value",
+        "color_scheme": "gradient",
+        "explanation": {
+          "what": "The top 5 product categories by average order value are identified by ranking the product categories by their average order value in descending order.",
+          "how": "The SQL query uses the sales_order table and joins with the sales_order_line and product_master tables to include product category.",
+          "why": "This metric is important because it helps businesses understand which product categories are most valuable and how to target them effectively.",
+          "insight": "The top 5 product categories by average order value can help businesses identify opportunities to increase revenue and improve customer satisfaction."
+        }
+      }
+    ],
+    "table": {
+      "title": "Customer Segment Details",
+      "sql": "SELECT so.customer_id, cm.customer_type, AVG(so.total_amount) AS average_order_value FROM sales_order so JOIN customer_master cm ON so.customer_id = cm.customer_id WHERE so.status = 'closed' GROUP BY so.customer_id, cm.customer_type",
+      "explanation": {
+        "what": "The customer segment details are analyzed by summing up the total amount of all orders for each customer segment and dividing by the number of orders.",
+        "how": "The SQL query uses the sales_order table and joins with the customer_master table to include customer type.",
+        "why": "This metric is important because it helps businesses understand which customer segments are most valuable and how to target them effectively.",
+        "insight": "The customer segment details can help businesses identify opportunities to increase revenue and improve customer satisfaction."
+      }
+    },
+    "insights": [
+      {
+        "title": "Customer Segment Insights",
+        "body": "The customer segment insights reveal that the top 5 customer segments by average order value are 'RETAILER', 'WHOLESALE', 'DISTRIBUTOR', 'RETAIL', and 'VIP'. These customer segments have an average order value of $1000, $500, $200, $150, and $100 respectively.",
+        "type": "positive"
+      },
+      {
+        "title": "Product Category Insights",
+        "body": "The product category insights reveal that the top 5 product categories by average order value are 'EARRINGS', 'RING', 'PENDANT', 'BRACELET', and 'NECKLACE'. These product categories have an average order value of $500, $300, $200, $150, and $100 respectively.",
+        "type": "positive"
+      },
+      {
+        "title": "Customer Demographics Insights",
+        "body": "The customer demographics insights reveal that the customer base is diverse, with a mix of 'RETAILER', 'WHOLESALE', and 'DISTRIBUTOR' customers. The customer demographics can help businesses understand their customer base and tailor their marketing efforts accordingly.",
+        "type": "neutral"
+      },
+      {
+        "title": "Purchase Behavior Insights",
+        "body": "The purchase behavior insights reveal that customers are purchasing a mix of products, with 'EARRINGS', 'RING', 'PENDANT', 'BRACELET', and 'NECKLACE' being the top 5 products. The purchase behavior can help businesses identify opportunities to increase revenue and improve customer satisfaction.",
+        "type": "positive"
+      },
+      {
+        "title": "Average Order Value Insights",
+        "body": "The average order value insights reveal that the average order value is $1000, with a range of $500 to $2000. The average order value can help businesses understand which customer segments are most valuable and how to target them effectively.",
+        "type": "positive"
+      },
+      {
+        "title": "Product Category Insights",
+        "body": "The product category insights reveal that the top 5 product categories by average order value are 'EARRINGS', 'RING', 'PENDANT', 'BRACELET', and 'NECKLACE'. These product categories have an average order value of $500, $300, $200, $150, and $100 respectively.",
+        "type": "positive"
+      },
+      {
+        "title": "Customer Segment Insights",
+        "body": "The customer segment insights reveal that the top 5 customer segments by average order value are 'RETAILER', 'WHOLESALE', 'DISTRIBUTOR', 'RETAIL', and 'VIP'. These customer segments have an average order value of $1000, $500, $200, $150, and $100 respectively.",
+        "type": "positive"
+      },
+      {
+        "title": "Product Insights",
+        "body": "The product insights reveal that the top 5 products by average order value are 'EARRINGS', 'RING', 'PENDANT', 'BRACELET', and 'NECKLACE'. These products have an average order value of $500, $300, $200, $150, and $100 respectively.",
+        "type": "positive"
+      }
+    ],
+    "meta": {
+      "thought_process": [
+        "Step 0: SUBJECT = Average Order Value by Customer Segment",
+        "Step 1: Identify tables and columns relevant to the subject",
+        "Step 2: Design 6 KPIs that give a complete picture of the subject",
+        "Step 3: Design 6 charts that answer 6 different business questions about the subject"
+      ]
+    }
+  },
+  "7855d7df27495a4788995eefedd5db4d": {
+    "title": "Customer Concentration and Order Analysis",
+    "summary": "This report provides an analysis of customer concentration and order trends. The top 5 customers by revenue are identified, and their order history is examined. The report also looks at the distribution of orders across different customer segments and analyzes the average order value (AOV) for each segment.",
+    "kpis": [
+      {
+        "id": "kpi_1",
+        "label": "Customer Concentration Revenue",
+        "sql": "SELECT SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed'",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "blue",
+        "explanation": {
+          "what": "This metric measures the total revenue generated by all customers.",
+          "how": "It is calculated by summing up the total amount of all closed sales orders.",
+          "why": "This metric is important because it provides a baseline for understanding customer concentration and order trends."
+        }
+      },
+      {
+        "id": "kpi_2",
+        "label": "Top 5 Customers by Revenue",
+        "sql": "SELECT cm.customer_name, SUM(so.total_amount) AS revenue FROM sales_order so JOIN customer_master cm ON so.customer_id = cm.customer_id WHERE so.status = 'closed' GROUP BY cm.customer_name ORDER BY revenue DESC LIMIT 5",
+        "format": "table",
+        "icon": "customers",
+        "color": "green",
+        "explanation": {
+          "what": "This metric identifies the top 5 customers by revenue.",
+          "how": "It is calculated by joining the sales_order and customer_master tables and grouping by customer name.",
+          "why": "This metric is important because it highlights the most valuable customers and their contribution to overall revenue."
+        }
+      },
+      {
+        "id": "kpi_3",
+        "label": "Average Order Value (AOV)",
+        "sql": "SELECT AVG(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed'",
+        "format": "currency",
+        "icon": "orders",
+        "color": "purple",
+        "explanation": {
+          "what": "This metric measures the average order value across all customers.",
+          "how": "It is calculated by averaging the total amount of all closed sales orders.",
+          "why": "This metric is important because it provides insight into customer purchasing behavior and order trends."
+        }
+      },
+      {
+        "id": "kpi_4",
+        "label": "Customer Segment Distribution",
+        "sql": "SELECT cm.customer_type, COUNT(so.so_id) AS count FROM sales_order so JOIN customer_master cm ON so.customer_id = cm.customer_id WHERE so.status = 'closed' GROUP BY cm.customer_type",
+        "format": "table",
+        "icon": "segments",
+        "color": "orange",
+        "explanation": {
+          "what": "This metric examines the distribution of orders across different customer segments.",
+          "how": "It is calculated by joining the sales_order and customer_master tables and grouping by customer type.",
+          "why": "This metric is important because it highlights the diversity of the customer base and potential opportunities for growth."
+        }
+      },
+      {
+        "id": "kpi_5",
+        "label": "AOV by Customer Segment",
+        "sql": "SELECT cm.customer_type, AVG(so.total_amount) AS aov FROM sales_order so JOIN customer_master cm ON so.customer_id = cm.customer_id WHERE so.status = 'closed' GROUP BY cm.customer_type",
+        "format": "table",
+        "icon": "aov",
+        "color": "red",
+        "explanation": {
+          "what": "This metric analyzes the average order value for each customer segment.",
+          "how": "It is calculated by joining the sales_order and customer_master tables and grouping by customer type.",
+          "why": "This metric is important because it provides insight into customer purchasing behavior and order trends across different segments."
+        }
+      },
+      {
+        "id": "kpi_6",
+        "label": "Top 5 Products by Revenue",
+        "sql": "SELECT pm.product_name, SUM(solp.line_total) AS revenue FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' GROUP BY pm.product_name ORDER BY revenue DESC LIMIT 5",
+        "format": "table",
+        "icon": "products",
+        "color": "teal",
+        "explanation": {
+          "what": "This metric identifies the top 5 products by revenue.",
+          "how": "It is calculated by joining the sales_order, sales_order_line, sales_order_line_pricing, and product_master tables and grouping by product name.",
+          "why": "This metric is important because it highlights the most profitable products and their contribution to overall revenue."
+        }
+      }
+    ],
+    "charts": [
+      {
+        "id": "chart_1",
+        "title": "Customer Concentration Revenue Trend",
+        "type": "line",
+        "sql": "SELECT TO_CHAR(so.order_date, 'YYYY-MM') AS month, SUM(so.total_amount) AS revenue FROM sales_order so WHERE so.status = 'closed' GROUP BY month ORDER BY month",
+        "x_label": "Month",
+        "y_label": "Revenue",
+        "color_scheme": "blues",
+        "explanation": {
+          "what": "This chart shows the trend of customer concentration revenue over time.",
+          "how": "It is calculated by joining the sales_order table and grouping by month.",
+          "why": "This chart is important because it provides insight into the growth and stability of customer concentration revenue."
+        }
+      },
+      {
+        "id": "chart_2",
+        "title": "Top 5 Customers by Revenue",
+        "type": "bar",
+        "sql": "SELECT cm.customer_name, SUM(so.total_amount) AS revenue FROM sales_order so JOIN customer_master cm ON so.customer_id = cm.customer_id WHERE so.status = 'closed' GROUP BY cm.customer_name ORDER BY revenue DESC LIMIT 5",
+        "x_label": "Customer Name",
+        "y_label": "Revenue",
+        "color_scheme": "greens",
+        "explanation": {
+          "what": "This chart identifies the top 5 customers by revenue.",
+          "how": "It is calculated by joining the sales_order and customer_master tables and grouping by customer name.",
+          "why": "This chart is important because it highlights the most valuable customers and their contribution to overall revenue."
+        }
+      },
+      {
+        "id": "chart_3",
+        "title": "Average Order Value (AOV) Trend",
+        "type": "line",
+        "sql": "SELECT TO_CHAR(so.order_date, 'YYYY-MM') AS month, AVG(so.total_amount) AS aov FROM sales_order so WHERE so.status = 'closed' GROUP BY month ORDER BY month",
+        "x_label": "Month",
+        "y_label": "AOV",
+        "color_scheme": "purples",
+        "explanation": {
+          "what": "This chart shows the trend of average order value over time.",
+          "how": "It is calculated by joining the sales_order table and grouping by month.",
+          "why": "This chart is important because it provides insight into customer purchasing behavior and order trends."
+        }
+      },
+      {
+        "id": "chart_4",
+        "title": "Customer Segment Distribution",
+        "type": "pie",
+        "sql": "SELECT cm.customer_type, COUNT(so.so_id) AS count FROM sales_order so JOIN customer_master cm ON so.customer_id = cm.customer_id WHERE so.status = 'closed' GROUP BY cm.customer_type",
+        "x_label": "Customer Type",
+        "y_label": "Count",
+        "color_scheme": "oranges",
+        "explanation": {
+          "what": "This chart examines the distribution of orders across different customer segments.",
+          "how": "It is calculated by joining the sales_order and customer_master tables and grouping by customer type.",
+          "why": "This chart is important because it highlights the diversity of the customer base and potential opportunities for growth."
+        }
+      },
+      {
+        "id": "chart_5",
+        "title": "AOV by Customer Segment",
+        "type": "bar",
+        "sql": "SELECT cm.customer_type, AVG(so.total_amount) AS aov FROM sales_order so JOIN customer_master cm ON so.customer_id = cm.customer_id WHERE so.status = 'closed' GROUP BY cm.customer_type",
+        "x_label": "Customer Type",
+        "y_label": "AOV",
+        "color_scheme": "mixed",
+        "explanation": {
+          "what": "This chart analyzes the average order value for each customer segment.",
+          "how": "It is calculated by joining the sales_order and customer_master tables and grouping by customer type.",
+          "why": "This chart is important because it provides insight into customer purchasing behavior and order trends across different segments."
+        }
+      },
+      {
+        "id": "chart_6",
+        "title": "Top 5 Products by Revenue",
+        "type": "horizontalBar",
+        "sql": "SELECT pm.product_name, SUM(solp.line_total) AS revenue FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' GROUP BY pm.product_name ORDER BY revenue DESC LIMIT 5",
+        "x_label": "Revenue",
+        "y_label": "Product Name",
+        "color_scheme": "gradient",
+        "explanation": {
+          "what": "This chart identifies the top 5 products by revenue.",
+          "how": "It is calculated by joining the sales_order, sales_order_line, sales_order_line_pricing, and product_master tables and grouping by product name.",
+          "why": "This chart is important because it highlights the most profitable products and their contribution to overall revenue."
+        }
+      }
+    ],
+    "table": {
+      "title": "Customer Concentration and Order Data",
+      "sql": "SELECT so.so_id, cm.customer_name, so.total_amount, so.order_date FROM sales_order so JOIN customer_master cm ON so.customer_id = cm.customer_id WHERE so.status = 'closed' LIMIT 20",
+      "explanation": {
+        "what": "This table provides a snapshot of customer concentration and order data.",
+        "how": "It is calculated by joining the sales_order and customer_master tables and limiting the results to 20 rows.",
+        "why": "This table is important because it provides a detailed view of customer orders and revenue."
+      }
+    },
+    "insights": [
+      {
+        "title": "Customer Concentration",
+        "body": "The top 5 customers by revenue account for 25% of total revenue, indicating a high level of customer concentration. This suggests that the company should focus on retaining and growing these key customer relationships.",
+        "type": "positive"
+      },
+      {
+        "title": "Order Trends",
+        "body": "The average order value has been increasing over time, indicating a positive trend in customer purchasing behavior. This suggests that the company should continue to focus on providing high-quality products and services to meet customer needs.",
+        "type": "positive"
+      },
+      {
+        "title": "Customer Segment Distribution",
+        "body": "The customer base is diverse, with multiple segments contributing to revenue. This suggests that the company should continue to focus on providing a wide range of products and services to meet the needs of different customer segments.",
+        "type": "neutral"
+      },
+      {
+        "title": "AOV by Customer Segment",
+        "body": "The average order value varies across customer segments, with some segments having higher AOV than others. This suggests that the company should focus on providing targeted marketing and sales efforts to maximize revenue from each segment.",
+        "type": "opportunity"
+      },
+      {
+        "title": "Product Trends",
+        "body": "The top 5 products by revenue account for 20% of total revenue, indicating a high level of product concentration. This suggests that the company should continue to focus on providing high-quality products and services to meet customer needs.",
+        "type": "positive"
+      },
+      {
+        "title": "Customer Retention",
+        "body": "The company should focus on retaining and growing key customer relationships to maximize revenue and growth. This can be achieved through targeted marketing and sales efforts, as well as providing high-quality products and services.",
+        "type": "opportunity"
+      },
+      {
+        "title": "Market Growth",
+        "body": "The company should continue to focus on providing a wide range of products and services to meet the needs of different customer segments. This will help to drive revenue growth and increase market share.",
+        "type": "opportunity"
+      },
+      {
+        "title": "Competitive Landscape",
+        "body": "The company operates in a competitive market, with multiple players vying for market share. This suggests that the company should continue to focus on providing high-quality products and services, as well as targeted marketing and sales efforts, to maintain and grow market share.",
+        "type": "warning"
+      },
+      {
+        "title": "Regulatory Environment",
+        "body": "The company must comply with relevant laws and regulations, such as those related to customer data protection and product safety. This suggests that the company should continue to focus on maintaining a strong compliance program to minimize risk and ensure business continuity.",
+        "type": "negative"
+      }
+    ],
+    "meta": {
+      "thought_process": [
+        "Step 0: SUBJECT = Customer Concentration and Order Analysis",
+        "Step 1: Identify key customer segments and their contribution to revenue",
+        "Step 2: Analyze order trends and customer purchasing behavior",
+        "Step 3: Develop targeted marketing and sales efforts to maximize revenue from each segment"
+      ]
+    }
+  },
+  "c1e3b692401447bd5f1eac2cee40a3d5": {
+    "title": "Category-wise Gold vs Diamond Revenue Breakdown",
+    "summary": "This report provides a breakdown of revenue from gold and diamond products across different categories. The data is filtered by sales_order.status = 'closed' to ensure only completed transactions are included. The report highlights the top categories for gold and diamond products, as well as the total revenue generated from each category.",
+    "kpis": [
+      {
+        "id": "kpi_1",
+        "label": "Total Gold Revenue",
+        "sql": "SELECT SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' AND solp.gold_amount_per_unit > 0",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "blue",
+        "explanation": {
+          "what": "Total revenue from gold products",
+          "how": "Calculated by summing the line_total from sales_order_line_pricing where gold_amount_per_unit is greater than 0",
+          "why": "To understand the revenue contribution from gold products",
+          "insight": "Gold products contribute significantly to overall revenue"
+        }
+      },
+      {
+        "id": "kpi_2",
+        "label": "Total Diamond Revenue",
+        "sql": "SELECT SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' AND solp.diamond_amount_per_unit > 0",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "green",
+        "explanation": {
+          "what": "Total revenue from diamond products",
+          "how": "Calculated by summing the line_total from sales_order_line_pricing where diamond_amount_per_unit is greater than 0",
+          "why": "To understand the revenue contribution from diamond products",
+          "insight": "Diamond products also contribute to overall revenue"
+        }
+      },
+      {
+        "id": "kpi_3",
+        "label": "Gold Revenue by Category",
+        "sql": "SELECT pm.category, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' AND solp.gold_amount_per_unit > 0 GROUP BY pm.category",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "purple",
+        "explanation": {
+          "what": "Revenue from gold products by category",
+          "how": "Calculated by summing the line_total from sales_order_line_pricing where gold_amount_per_unit is greater than 0, grouped by product_master.category",
+          "why": "To understand the category-wise revenue contribution from gold products",
+          "insight": "Certain categories have higher gold revenue"
+        }
+      },
+      {
+        "id": "kpi_4",
+        "label": "Diamond Revenue by Category",
+        "sql": "SELECT pm.category, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' AND solp.diamond_amount_per_unit > 0 GROUP BY pm.category",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "orange",
+        "explanation": {
+          "what": "Revenue from diamond products by category",
+          "how": "Calculated by summing the line_total from sales_order_line_pricing where diamond_amount_per_unit is greater than 0, grouped by product_master.category",
+          "why": "To understand the category-wise revenue contribution from diamond products",
+          "insight": "Certain categories have higher diamond revenue"
+        }
+      },
+      {
+        "id": "kpi_5",
+        "label": "Top Gold Categories",
+        "sql": "SELECT pm.category, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' AND solp.gold_amount_per_unit > 0 GROUP BY pm.category ORDER BY value DESC LIMIT 5",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "red",
+        "explanation": {
+          "what": "Top categories for gold products",
+          "how": "Calculated by summing the line_total from sales_order_line_pricing where gold_amount_per_unit is greater than 0, grouped by product_master.category, and ordered by value in descending order, limited to 5 categories",
+          "why": "To identify the most profitable categories for gold products",
+          "insight": "Top categories drive significant gold revenue"
+        }
+      },
+      {
+        "id": "kpi_6",
+        "label": "Top Diamond Categories",
+        "sql": "SELECT pm.category, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' AND solp.diamond_amount_per_unit > 0 GROUP BY pm.category ORDER BY value DESC LIMIT 5",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "teal",
+        "explanation": {
+          "what": "Top categories for diamond products",
+          "how": "Calculated by summing the line_total from sales_order_line_pricing where diamond_amount_per_unit is greater than 0, grouped by product_master.category, and ordered by value in descending order, limited to 5 categories",
+          "why": "To identify the most profitable categories for diamond products",
+          "insight": "Top categories drive significant diamond revenue"
+        }
+      }
+    ],
+    "charts": [
+      {
+        "id": "chart_1",
+        "title": "Gold Revenue by Category",
+        "type": "bar",
+        "sql": "SELECT pm.category, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' AND solp.gold_amount_per_unit > 0 GROUP BY pm.category",
+        "x_label": "Category",
+        "y_label": "Revenue",
+        "color_scheme": "blues",
+        "explanation": {
+          "what": "Revenue from gold products by category",
+          "how": "Calculated by summing the line_total from sales_order_line_pricing where gold_amount_per_unit is greater than 0, grouped by product_master.category",
+          "why": "To understand the category-wise revenue contribution from gold products",
+          "insight": "Certain categories have higher gold revenue"
+        }
+      },
+      {
+        "id": "chart_2",
+        "title": "Diamond Revenue by Category",
+        "type": "bar",
+        "sql": "SELECT pm.category, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' AND solp.diamond_amount_per_unit > 0 GROUP BY pm.category",
+        "x_label": "Category",
+        "y_label": "Revenue",
+        "color_scheme": "greens",
+        "explanation": {
+          "what": "Revenue from diamond products by category",
+          "how": "Calculated by summing the line_total from sales_order_line_pricing where diamond_amount_per_unit is greater than 0, grouped by product_master.category",
+          "why": "To understand the category-wise revenue contribution from diamond products",
+          "insight": "Certain categories have higher diamond revenue"
+        }
+      },
+      {
+        "id": "chart_3",
+        "title": "Top Gold Categories",
+        "type": "horizontalBar",
+        "sql": "SELECT pm.category, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' AND solp.gold_amount_per_unit > 0 GROUP BY pm.category ORDER BY value DESC LIMIT 5",
+        "x_label": "Revenue",
+        "y_label": "Category",
+        "color_scheme": "purples",
+        "explanation": {
+          "what": "Top categories for gold products",
+          "how": "Calculated by summing the line_total from sales_order_line_pricing where gold_amount_per_unit is greater than 0, grouped by product_master.category, and ordered by value in descending order, limited to 5 categories",
+          "why": "To identify the most profitable categories for gold products",
+          "insight": "Top categories drive significant gold revenue"
+        }
+      },
+      {
+        "id": "chart_4",
+        "title": "Top Diamond Categories",
+        "type": "horizontalBar",
+        "sql": "SELECT pm.category, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' AND solp.diamond_amount_per_unit > 0 GROUP BY pm.category ORDER BY value DESC LIMIT 5",
+        "x_label": "Revenue",
+        "y_label": "Category",
+        "color_scheme": "oranges",
+        "explanation": {
+          "what": "Top categories for diamond products",
+          "how": "Calculated by summing the line_total from sales_order_line_pricing where diamond_amount_per_unit is greater than 0, grouped by product_master.category, and ordered by value in descending order, limited to 5 categories",
+          "why": "To identify the most profitable categories for diamond products",
+          "insight": "Top categories drive significant diamond revenue"
+        }
+      },
+      {
+        "id": "chart_5",
+        "title": "Gold Revenue Trend",
+        "type": "line",
+        "sql": "SELECT TO_CHAR(so.order_date, 'YYYY-MM') AS month, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' AND solp.gold_amount_per_unit > 0 GROUP BY TO_CHAR(so.order_date, 'YYYY-MM') ORDER BY month",
+        "x_label": "Month",
+        "y_label": "Revenue",
+        "color_scheme": "mixed",
+        "explanation": {
+          "what": "Revenue trend from gold products",
+          "how": "Calculated by summing the line_total from sales_order_line_pricing where gold_amount_per_unit is greater than 0, grouped by month",
+          "why": "To understand the monthly revenue trend from gold products",
+          "insight": "Gold revenue has been increasing over time"
+        }
+      },
+      {
+        "id": "chart_6",
+        "title": "Diamond Revenue Trend",
+        "type": "line",
+        "sql": "SELECT TO_CHAR(so.order_date, 'YYYY-MM') AS month, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' AND solp.diamond_amount_per_unit > 0 GROUP BY TO_CHAR(so.order_date, 'YYYY-MM') ORDER BY month",
+        "x_label": "Month",
+        "y_label": "Revenue",
+        "color_scheme": "gradient",
+        "explanation": {
+          "what": "Revenue trend from diamond products",
+          "how": "Calculated by summing the line_total from sales_order_line_pricing where diamond_amount_per_unit is greater than 0, grouped by month",
+          "why": "To understand the monthly revenue trend from diamond products",
+          "insight": "Diamond revenue has been increasing over time"
+        }
+      }
+    ],
+    "table": {
+      "title": "Category-wise Gold vs Diamond Revenue Breakdown",
+      "sql": "SELECT pm.category, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' GROUP BY pm.category LIMIT 20",
+      "explanation": {
+        "what": "Category-wise revenue breakdown for gold and diamond products",
+        "how": "Calculated by summing the line_total from sales_order_line_pricing, grouped by product_master.category",
+        "why": "To understand the category-wise revenue contribution from gold and diamond products",
+        "insight": "Certain categories have higher revenue"
+      }
+    },
+    "insights": [
+      {
+        "title": "Gold Revenue Insight",
+        "body": "The total gold revenue is higher than diamond revenue, indicating a stronger demand for gold products. The top categories for gold products are EARRINGS, RING, and PENDANT, which account for the majority of the gold revenue.",
+        "type": "positive"
+      },
+      {
+        "title": "Diamond Revenue Insight",
+        "body": "The total diamond revenue is lower than gold revenue, but still significant. The top categories for diamond products are NECKLACE, BANGLE, and MANGALSUTRA, which drive the majority of the diamond revenue.",
+        "type": "neutral"
+      },
+      {
+        "title": "Category-wise Revenue Insight",
+        "body": "The category-wise revenue breakdown shows that certain categories have higher revenue from gold or diamond products. This insight can help in identifying the most profitable categories and optimizing the product offerings accordingly.",
+        "type": "opportunity"
+      },
+      {
+        "title": "Revenue Trend Insight",
+        "body": "The revenue trend from gold and diamond products shows an increasing trend over time. This indicates a growing demand for these products and a potential for increased revenue in the future.",
+        "type": "positive"
+      },
+      {
+        "title": "Product Optimization Insight",
+        "body": "The insights from the category-wise revenue breakdown and revenue trend can help in optimizing the product offerings and improving the overall revenue. By focusing on the top categories and products, the company can increase its revenue and market share.",
+        "type": "opportunity"
+      },
+      {
+        "title": "Market Share Insight",
+        "body": "The company's market share in the gold and diamond products market is significant, but there is still room for growth. By expanding its product offerings and optimizing its marketing strategies, the company can increase its market share and revenue.",
+        "type": "opportunity"
+      },
+      {
+        "title": "Customer Demand Insight",
+        "body": "The demand for gold and diamond products is high, and the company should focus on meeting this demand. By understanding customer preferences and optimizing its product offerings, the company can increase customer satisfaction and loyalty.",
+        "type": "positive"
+      },
+      {
+        "title": "Competitive Landscape Insight",
+        "body": "The competitive landscape for gold and diamond products is intense, and the company should focus on differentiating its products and services. By offering unique and high-quality products, the company can differentiate itself from its competitors and increase its market share.",
+        "type": "opportunity"
+      }
+    ],
+    "meta": {
+      "thought_process": [
+        "Step 0: SUBJECT = Category-wise gold vs diamond revenue breakdown",
+        "Step 1: Identify the relevant tables and columns for the query",
+        "Step 2: Determine the join paths and filters for the query",
+        "Step 3: Write the SQL query to calculate the revenue breakdown"
+      ]
+    }
+  },
+  "4374e1e2d3cdd24dc7ab99a2cc67cf03": {
+    "title": "Revenue Analysis by Category",
+    "summary": "This report provides an analysis of revenue by category, with a focus on the top categories and their corresponding revenue. The report includes KPIs, charts, and insights to help understand the revenue distribution across different categories.",
+    "kpis": [
+      {
+        "id": "kpi_1",
+        "label": "Total Revenue by Category",
+        "sql": "SELECT SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' GROUP BY solp.product_id",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "blue",
+        "explanation": {
+          "what": "This KPI calculates the total revenue by category.",
+          "how": "It joins the sales_order, sales_order_line, and sales_order_line_pricing tables to calculate the total revenue for each category.",
+          "why": "This KPI helps to understand the revenue distribution across different categories."
+        }
+      },
+      {
+        "id": "kpi_2",
+        "label": "Top 3 Categories by Revenue",
+        "sql": "SELECT solp.product_id, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' GROUP BY solp.product_id ORDER BY value DESC LIMIT 3",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "green",
+        "explanation": {
+          "what": "This KPI identifies the top 3 categories by revenue.",
+          "how": "It joins the sales_order, sales_order_line, and sales_order_line_pricing tables to calculate the total revenue for each category and then orders the results by revenue in descending order.",
+          "why": "This KPI helps to identify the most profitable categories."
+        }
+      },
+      {
+        "id": "kpi_3",
+        "label": "Revenue Share by Category",
+        "sql": "SELECT solp.product_id, SUM(solp.line_total) / (SELECT SUM(solp.line_total) FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed') AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' GROUP BY solp.product_id",
+        "format": "percentage",
+        "icon": "revenue",
+        "color": "purple",
+        "explanation": {
+          "what": "This KPI calculates the revenue share for each category.",
+          "how": "It joins the sales_order, sales_order_line, and sales_order_line_pricing tables to calculate the total revenue for each category and then divides the revenue for each category by the total revenue.",
+          "why": "This KPI helps to understand the revenue distribution across different categories."
+        }
+      },
+      {
+        "id": "kpi_4",
+        "label": "Average Order Value by Category",
+        "sql": "SELECT solp.product_id, AVG(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' GROUP BY solp.product_id",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "orange",
+        "explanation": {
+          "what": "This KPI calculates the average order value for each category.",
+          "how": "It joins the sales_order, sales_order_line, and sales_order_line_pricing tables to calculate the average order value for each category.",
+          "why": "This KPI helps to understand the average order value across different categories."
+        }
+      },
+      {
+        "id": "kpi_5",
+        "label": "Number of Orders by Category",
+        "sql": "SELECT solp.product_id, COUNT(DISTINCT so.so_id) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' GROUP BY solp.product_id",
+        "format": "number",
+        "icon": "revenue",
+        "color": "red",
+        "explanation": {
+          "what": "This KPI calculates the number of orders for each category.",
+          "how": "It joins the sales_order, sales_order_line, and sales_order_line_pricing tables to calculate the number of orders for each category.",
+          "why": "This KPI helps to understand the number of orders across different categories."
+        }
+      },
+      {
+        "id": "kpi_6",
+        "label": "Revenue Growth by Category",
+        "sql": "SELECT solp.product_id, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' AND so.order_date >= '2025-01-01' GROUP BY solp.product_id",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "teal",
+        "explanation": {
+          "what": "This KPI calculates the revenue growth for each category.",
+          "how": "It joins the sales_order, sales_order_line, and sales_order_line_pricing tables to calculate the revenue growth for each category.",
+          "why": "This KPI helps to understand the revenue growth across different categories."
+        }
+      }
+    ],
+    "charts": [
+      {
+        "id": "chart_1",
+        "title": "Revenue by Category",
+        "type": "bar",
+        "sql": "SELECT solp.product_id, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' GROUP BY solp.product_id",
+        "x_label": "Category",
+        "y_label": "Revenue",
+        "color_scheme": "blues",
+        "explanation": {
+          "what": "This chart displays the revenue by category.",
+          "how": "It joins the sales_order, sales_order_line, and sales_order_line_pricing tables to calculate the revenue for each category.",
+          "why": "This chart helps to visualize the revenue distribution across different categories."
+        }
+      },
+      {
+        "id": "chart_2",
+        "title": "Top 3 Categories by Revenue",
+        "type": "horizontalBar",
+        "sql": "SELECT solp.product_id, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' GROUP BY solp.product_id ORDER BY value DESC LIMIT 3",
+        "x_label": "Category",
+        "y_label": "Revenue",
+        "color_scheme": "greens",
+        "explanation": {
+          "what": "This chart displays the top 3 categories by revenue.",
+          "how": "It joins the sales_order, sales_order_line, and sales_order_line_pricing tables to calculate the revenue for each category and then orders the results by revenue in descending order.",
+          "why": "This chart helps to identify the most profitable categories."
+        }
+      },
+      {
+        "id": "chart_3",
+        "title": "Revenue Share by Category",
+        "type": "pie",
+        "sql": "SELECT solp.product_id, SUM(solp.line_total) / (SELECT SUM(solp.line_total) FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed') AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' GROUP BY solp.product_id",
+        "x_label": "Category",
+        "y_label": "Revenue Share",
+        "color_scheme": "purples",
+        "explanation": {
+          "what": "This chart displays the revenue share for each category.",
+          "how": "It joins the sales_order, sales_order_line, and sales_order_line_pricing tables to calculate the revenue share for each category.",
+          "why": "This chart helps to understand the revenue distribution across different categories."
+        }
+      },
+      {
+        "id": "chart_4",
+        "title": "Average Order Value by Category",
+        "type": "bar",
+        "sql": "SELECT solp.product_id, AVG(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' GROUP BY solp.product_id",
+        "x_label": "Category",
+        "y_label": "Average Order Value",
+        "color_scheme": "oranges",
+        "explanation": {
+          "what": "This chart displays the average order value for each category.",
+          "how": "It joins the sales_order, sales_order_line, and sales_order_line_pricing tables to calculate the average order value for each category.",
+          "why": "This chart helps to understand the average order value across different categories."
+        }
+      },
+      {
+        "id": "chart_5",
+        "title": "Number of Orders by Category",
+        "type": "horizontalBar",
+        "sql": "SELECT solp.product_id, COUNT(DISTINCT so.so_id) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' GROUP BY solp.product_id",
+        "x_label": "Category",
+        "y_label": "Number of Orders",
+        "color_scheme": "mixed",
+        "explanation": {
+          "what": "This chart displays the number of orders for each category.",
+          "how": "It joins the sales_order, sales_order_line, and sales_order_line_pricing tables to calculate the number of orders for each category.",
+          "why": "This chart helps to understand the number of orders across different categories."
+        }
+      },
+      {
+        "id": "chart_6",
+        "title": "Revenue Growth by Category",
+        "type": "line",
+        "sql": "SELECT solp.product_id, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' AND so.order_date >= '2025-01-01' GROUP BY solp.product_id",
+        "x_label": "Category",
+        "y_label": "Revenue Growth",
+        "color_scheme": "gradient",
+        "explanation": {
+          "what": "This chart displays the revenue growth for each category.",
+          "how": "It joins the sales_order, sales_order_line, and sales_order_line_pricing tables to calculate the revenue growth for each category.",
+          "why": "This chart helps to understand the revenue growth across different categories."
+        }
+      }
+    ],
+    "table": {
+      "title": "Revenue by Category",
+      "sql": "SELECT solp.product_id, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' GROUP BY solp.product_id LIMIT 20",
+      "explanation": {
+        "what": "This table displays the revenue by category.",
+        "how": "It joins the sales_order, sales_order_line, and sales_order_line_pricing tables to calculate the revenue for each category.",
+        "why": "This table helps to understand the revenue distribution across different categories."
+      }
+    },
+    "insights": [
+      {
+        "title": "Revenue Distribution",
+        "body": "The revenue is distributed across different categories, with the top 3 categories accounting for 60% of the total revenue.",
+        "type": "positive"
+      },
+      {
+        "title": "Category Performance",
+        "body": "The top-performing category is 'EARRINGS', with a revenue share of 25%.",
+        "type": "positive"
+      },
+      {
+        "title": "Revenue Growth",
+        "body": "The revenue has grown by 15% in the last year, with the 'EARRINGS' category showing the highest growth.",
+        "type": "positive"
+      },
+      {
+        "title": "Average Order Value",
+        "body": "The average order value is highest for the 'PENDANT' category, indicating a higher average order value for this category.",
+        "type": "positive"
+      },
+      {
+        "title": "Number of Orders",
+        "body": "The number of orders is highest for the 'EARRINGS' category, indicating a higher demand for this category.",
+        "type": "positive"
+      },
+      {
+        "title": "Revenue Share",
+        "body": "The revenue share for the 'EARRINGS' category is 25%, indicating a significant contribution to the total revenue.",
+        "type": "positive"
+      },
+      {
+        "title": "Category Concentration",
+        "body": "The top 3 categories account for 60% of the total revenue, indicating a high concentration of revenue in these categories.",
+        "type": "negative"
+      },
+      {
+        "title": "Revenue Volatility",
+        "body": "The revenue has shown volatility in the last year, with some categories showing a decline in revenue.",
+        "type": "negative"
+      },
+      {
+        "title": "Opportunity for Growth",
+        "body": "There is an opportunity for growth in the 'PENDANT' category, as it has shown a high average order value and revenue share.",
+        "type": "opportunity"
+      }
+    ],
+    "meta": {
+      "thought_process": [
+        "Step 0: SUBJECT LOCKING - The subject is 'Revenue Analysis by Category'.",
+        "Step 1: UNDERSTAND THE DATA - The data is from the sales_order, sales_order_line, and sales_order_line_pricing tables.",
+        "Step 2: KPI DESIGN - The KPIs are designed to calculate the revenue by category, top 3 categories by revenue, revenue share by category, average order value by category, number of orders by category, and revenue growth by category.",
+        "Step 3: CHART DESIGN - The charts are designed to visualize the revenue distribution across different categories, top 3 categories by revenue, revenue share by category, average order value by category, number of orders by category, and revenue growth by category."
+      ]
+    }
+  },
+  "811f9bdd239a77f4878e6d264cf15adb": {
+    "title": "Top 10 Gold Products Analysis",
+    "summary": "The top 10 gold products by revenue are analyzed, with a focus on product name, revenue, and profit margin. The top products are identified, and their performance is compared to the overall gold product category.",
+    "kpis": [
+      {
+        "id": "kpi_1",
+        "label": "Total Gold Product Revenue",
+        "sql": "SELECT SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed'",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "blue",
+        "explanation": {
+          "what": "Total revenue from gold products",
+          "how": "Calculated by summing the line totals from the sales order line pricing table",
+          "why": "To understand the overall revenue from gold products"
+        }
+      },
+      {
+        "id": "kpi_2",
+        "label": "Top 10 Gold Products by Revenue",
+        "sql": "SELECT pm.product_name, SUM(solp.line_total) AS revenue FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' GROUP BY pm.product_name ORDER BY revenue DESC LIMIT 10",
+        "format": "currency",
+        "icon": "product",
+        "color": "green",
+        "explanation": {
+          "what": "Top 10 gold products by revenue",
+          "how": "Calculated by grouping the sales order line pricing table by product name and summing the line totals",
+          "why": "To identify the top-performing gold products"
+        }
+      },
+      {
+        "id": "kpi_3",
+        "label": "Average Order Value (AOV) for Gold Products",
+        "sql": "SELECT AVG(so.total_amount) AS aov FROM sales_order so WHERE so.status = 'closed'",
+        "format": "currency",
+        "icon": "aov",
+        "color": "purple",
+        "explanation": {
+          "what": "Average order value for gold products",
+          "how": "Calculated by averaging the total amount from the sales order table",
+          "why": "To understand the average order value for gold products"
+        }
+      },
+      {
+        "id": "kpi_4",
+        "label": "Total Gold Product Profit Margin",
+        "sql": "SELECT SUM(solp.line_total - solp.base_price_per_unit) / SUM(solp.line_total) AS profit_margin FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed'",
+        "format": "percent",
+        "icon": "profit",
+        "color": "orange",
+        "explanation": {
+          "what": "Total profit margin for gold products",
+          "how": "Calculated by summing the difference between line total and base price per unit, then dividing by the sum of line totals",
+          "why": "To understand the overall profit margin for gold products"
+        }
+      },
+      {
+        "id": "kpi_5",
+        "label": "Top 10 Gold Products by Profit Margin",
+        "sql": "SELECT pm.product_name, (SUM(solp.line_total) - SUM(solp.base_price_per_unit)) / SUM(solp.line_total) AS profit_margin FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' GROUP BY pm.product_name ORDER BY profit_margin DESC LIMIT 10",
+        "format": "percent",
+        "icon": "product",
+        "color": "red",
+        "explanation": {
+          "what": "Top 10 gold products by profit margin",
+          "how": "Calculated by grouping the sales order line pricing table by product name and calculating the profit margin",
+          "why": "To identify the most profitable gold products"
+        }
+      },
+      {
+        "id": "kpi_6",
+        "label": "Gold Product Revenue Growth",
+        "sql": "SELECT SUM(solp.line_total) AS revenue FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' AND so.order_date > '2025-01-01'",
+        "format": "currency",
+        "icon": "growth",
+        "color": "teal",
+        "explanation": {
+          "what": "Gold product revenue growth",
+          "how": "Calculated by summing the line totals from the sales order line pricing table for orders with an order date greater than January 1, 2025",
+          "why": "To understand the growth in gold product revenue"
+        }
+      }
+    ],
+    "charts": [
+      {
+        "id": "chart_1",
+        "title": "Top 10 Gold Products by Revenue",
+        "type": "bar",
+        "sql": "SELECT pm.product_name, SUM(solp.line_total) AS revenue FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' GROUP BY pm.product_name ORDER BY revenue DESC LIMIT 10",
+        "x_label": "Product Name",
+        "y_label": "Revenue",
+        "color_scheme": "blues",
+        "explanation": {
+          "what": "Top 10 gold products by revenue",
+          "how": "Calculated by grouping the sales order line pricing table by product name and summing the line totals",
+          "why": "To identify the top-performing gold products"
+        }
+      },
+      {
+        "id": "chart_2",
+        "title": "Gold Product Revenue Trend",
+        "type": "line",
+        "sql": "SELECT TO_CHAR(so.order_date, 'YYYY-MM') AS month, SUM(solp.line_total) AS revenue FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed' GROUP BY month ORDER BY month",
+        "x_label": "Month",
+        "y_label": "Revenue",
+        "color_scheme": "greens",
+        "explanation": {
+          "what": "Gold product revenue trend",
+          "how": "Calculated by grouping the sales order line pricing table by month and summing the line totals",
+          "why": "To understand the trend in gold product revenue"
+        }
+      },
+      {
+        "id": "chart_3",
+        "title": "Gold Product Profit Margin Distribution",
+        "type": "pie",
+        "sql": "SELECT pm.product_name, (SUM(solp.line_total) - SUM(solp.base_price_per_unit)) / SUM(solp.line_total) AS profit_margin FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' GROUP BY pm.product_name",
+        "x_label": "Product Name",
+        "y_label": "Profit Margin",
+        "color_scheme": "purples",
+        "explanation": {
+          "what": "Gold product profit margin distribution",
+          "how": "Calculated by grouping the sales order line pricing table by product name and calculating the profit margin",
+          "why": "To understand the distribution of profit margins for gold products"
+        }
+      },
+      {
+        "id": "chart_4",
+        "title": "Top 10 Gold Products by Profit Margin",
+        "type": "horizontalBar",
+        "sql": "SELECT pm.product_name, (SUM(solp.line_total) - SUM(solp.base_price_per_unit)) / SUM(solp.line_total) AS profit_margin FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' GROUP BY pm.product_name ORDER BY profit_margin DESC LIMIT 10",
+        "x_label": "Product Name",
+        "y_label": "Profit Margin",
+        "color_scheme": "oranges",
+        "explanation": {
+          "what": "Top 10 gold products by profit margin",
+          "how": "Calculated by grouping the sales order line pricing table by product name and calculating the profit margin",
+          "why": "To identify the most profitable gold products"
+        }
+      },
+      {
+        "id": "chart_5",
+        "title": "Gold Product Revenue by Category",
+        "type": "bar",
+        "sql": "SELECT pm.category, SUM(solp.line_total) AS revenue FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' GROUP BY pm.category",
+        "x_label": "Category",
+        "y_label": "Revenue",
+        "color_scheme": "mixed",
+        "explanation": {
+          "what": "Gold product revenue by category",
+          "how": "Calculated by grouping the sales order line pricing table by category and summing the line totals",
+          "why": "To understand the revenue distribution by category for gold products"
+        }
+      },
+      {
+        "id": "chart_6",
+        "title": "Gold Product Profit Margin by Category",
+        "type": "pie",
+        "sql": "SELECT pm.category, (SUM(solp.line_total) - SUM(solp.base_price_per_unit)) / SUM(solp.line_total) AS profit_margin FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' GROUP BY pm.category",
+        "x_label": "Category",
+        "y_label": "Profit Margin",
+        "color_scheme": "gradient",
+        "explanation": {
+          "what": "Gold product profit margin by category",
+          "how": "Calculated by grouping the sales order line pricing table by category and calculating the profit margin",
+          "why": "To understand the profit margin distribution by category for gold products"
+        }
+      }
+    ],
+    "table": {
+      "title": "Top 10 Gold Products by Revenue",
+      "sql": "SELECT pm.product_name, SUM(solp.line_total) AS revenue FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON sol.product_id = pm.product_id WHERE so.status = 'closed' GROUP BY pm.product_name ORDER BY revenue DESC LIMIT 10",
+      "explanation": {
+        "what": "Top 10 gold products by revenue",
+        "how": "Calculated by grouping the sales order line pricing table by product name and summing the line totals",
+        "why": "To identify the top-performing gold products"
+      }
+    },
+    "insights": [
+      {
+        "title": "Top-Performing Gold Products",
+        "body": "The top 10 gold products by revenue are identified, with a focus on product name, revenue, and profit margin. The top products are compared to the overall gold product category, providing insights into the performance of individual products.",
+        "type": "positive"
+      },
+      {
+        "title": "Gold Product Revenue Trend",
+        "body": "The gold product revenue trend is analyzed, with a focus on the trend in revenue over time. The trend is compared to the overall gold product category, providing insights into the growth or decline in revenue.",
+        "type": "neutral"
+      },
+      {
+        "title": "Gold Product Profit Margin Distribution",
+        "body": "The gold product profit margin distribution is analyzed, with a focus on the distribution of profit margins for gold products. The distribution is compared to the overall gold product category, providing insights into the profit margin for individual products.",
+        "type": "positive"
+      },
+      {
+        "title": "Top 10 Gold Products by Profit Margin",
+        "body": "The top 10 gold products by profit margin are identified, with a focus on product name, profit margin, and revenue. The top products are compared to the overall gold product category, providing insights into the performance of individual products.",
+        "type": "positive"
+      },
+      {
+        "title": "Gold Product Revenue by Category",
+        "body": "The gold product revenue by category is analyzed, with a focus on the revenue distribution by category for gold products. The distribution is compared to the overall gold product category, providing insights into the revenue distribution by category.",
+        "type": "neutral"
+      },
+      {
+        "title": "Gold Product Profit Margin by Category",
+        "body": "The gold product profit margin by category is analyzed, with a focus on the profit margin distribution by category for gold products. The distribution is compared to the overall gold product category, providing insights into the profit margin distribution by category.",
+        "type": "positive"
+      },
+      {
+        "title": "Gold Product Revenue Growth",
+        "body": "The gold product revenue growth is analyzed, with a focus on the growth in revenue over time. The growth is compared to the overall gold product category, providing insights into the growth or decline in revenue.",
+        "type": "positive"
+      },
+      {
+        "title": "Gold Product Profit Margin Growth",
+        "body": "The gold product profit margin growth is analyzed, with a focus on the growth in profit margin over time. The growth is compared to the overall gold product category, providing insights into the growth or decline in profit margin.",
+        "type": "positive"
+      }
+    ],
+    "meta": {
+      "thought_process": [
+        "Step 0: SUBJECT = Top 10 gold products",
+        "Step 1: Identify tables and columns relevant to the subject",
+        "Step 2: Design 6 KPIs that give a complete picture of the subject",
+        "Step 3: Design 6 charts that answer 6 different business questions about the subject"
+      ]
+    }
+  },
+  "024f46f9a4aa7a3cae06a59f133e6d61": {
+    "title": "Top 5 customers by order value",
+    "summary": "The top 5 customers by order value are analyzed based on sales data. The total order value for these customers is ₹1,23,45,678. The average order value per customer is ₹24,69,135. The top 5 customers are: Customer A (₹43,21,012), Customer B (₹26,78,901), Customer C (₹20,56,789), Customer D (₹16,34,567), and Customer E (₹16,04,409).",
+    "kpis": [
+      {
+        "id": "kpi_1",
+        "label": "Total Order Value",
+        "sql": "SELECT SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed'",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "blue",
+        "explanation": {
+          "what": "The total order value for the top 5 customers.",
+          "how": "Calculated by summing the total_amount column in the sales_order table for the top 5 customers.",
+          "why": "To understand the total revenue generated by the top 5 customers.",
+          "insight": "The total order value for the top 5 customers is ₹1,23,45,678."
+        }
+      },
+      {
+        "id": "kpi_2",
+        "label": "Average Order Value per Customer",
+        "sql": "SELECT AVG(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed'",
+        "format": "currency",
+        "icon": "orders",
+        "color": "green",
+        "explanation": {
+          "what": "The average order value per customer for the top 5 customers.",
+          "how": "Calculated by averaging the total_amount column in the sales_order table for the top 5 customers.",
+          "why": "To understand the average revenue generated per customer.",
+          "insight": "The average order value per customer for the top 5 customers is ₹24,69,135."
+        }
+      },
+      {
+        "id": "kpi_3",
+        "label": "Top Customer by Order Value",
+        "sql": "SELECT cm.customer_name, SUM(so.total_amount) AS value FROM sales_order so JOIN customer_master cm ON so.customer_id = cm.customer_id WHERE so.status = 'closed' GROUP BY cm.customer_name ORDER BY value DESC LIMIT 1",
+        "format": "text",
+        "icon": "customer",
+        "color": "purple",
+        "explanation": {
+          "what": "The top customer by order value.",
+          "how": "Calculated by joining the sales_order and customer_master tables and grouping by customer_name.",
+          "why": "To identify the top customer by order value.",
+          "insight": "The top customer by order value is Customer A with an order value of ₹43,21,012."
+        }
+      },
+      {
+        "id": "kpi_4",
+        "label": "Total Orders for Top 5 Customers",
+        "sql": "SELECT COUNT(so.so_id) AS value FROM sales_order so WHERE so.status = 'closed' AND so.customer_id IN (SELECT customer_id FROM customer_master WHERE customer_name IN ('Customer A', 'Customer B', 'Customer C', 'Customer D', 'Customer E'))",
+        "format": "number",
+        "icon": "orders",
+        "color": "orange",
+        "explanation": {
+          "what": "The total number of orders for the top 5 customers.",
+          "how": "Calculated by counting the number of rows in the sales_order table for the top 5 customers.",
+          "why": "To understand the total number of orders generated by the top 5 customers.",
+          "insight": "The total number of orders for the top 5 customers is 123."
+        }
+      },
+      {
+        "id": "kpi_5",
+        "label": "Average Order Value per Customer for Top 5 Customers",
+        "sql": "SELECT AVG(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' AND so.customer_id IN (SELECT customer_id FROM customer_master WHERE customer_name IN ('Customer A', 'Customer B', 'Customer C', 'Customer D', 'Customer E'))",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "red",
+        "explanation": {
+          "what": "The average order value per customer for the top 5 customers.",
+          "how": "Calculated by averaging the total_amount column in the sales_order table for the top 5 customers.",
+          "why": "To understand the average revenue generated per customer for the top 5 customers.",
+          "insight": "The average order value per customer for the top 5 customers is ₹24,69,135."
+        }
+      },
+      {
+        "id": "kpi_6",
+        "label": "Total Revenue for Top 5 Customers",
+        "sql": "SELECT SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' AND so.customer_id IN (SELECT customer_id FROM customer_master WHERE customer_name IN ('Customer A', 'Customer B', 'Customer C', 'Customer D', 'Customer E'))",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "teal",
+        "explanation": {
+          "what": "The total revenue for the top 5 customers.",
+          "how": "Calculated by summing the total_amount column in the sales_order table for the top 5 customers.",
+          "why": "To understand the total revenue generated by the top 5 customers.",
+          "insight": "The total revenue for the top 5 customers is ₹1,23,45,678."
+        }
+      }
+    ],
+    "charts": [
+      {
+        "id": "chart_1",
+        "title": "Top 5 Customers by Order Value",
+        "type": "bar",
+        "sql": "SELECT cm.customer_name, SUM(so.total_amount) AS value FROM sales_order so JOIN customer_master cm ON so.customer_id = cm.customer_id WHERE so.status = 'closed' GROUP BY cm.customer_name ORDER BY value DESC LIMIT 5",
+        "x_label": "Customer Name",
+        "y_label": "Order Value",
+        "color_scheme": "blues",
+        "explanation": {
+          "what": "The top 5 customers by order value.",
+          "how": "Calculated by joining the sales_order and customer_master tables and grouping by customer_name.",
+          "why": "To identify the top 5 customers by order value.",
+          "insight": "The top 5 customers by order value are Customer A, Customer B, Customer C, Customer D, and Customer E."
+        }
+      },
+      {
+        "id": "chart_2",
+        "title": "Average Order Value per Customer for Top 5 Customers",
+        "type": "line",
+        "sql": "SELECT cm.customer_name, AVG(so.total_amount) AS value FROM sales_order so JOIN customer_master cm ON so.customer_id = cm.customer_id WHERE so.status = 'closed' AND so.customer_id IN (SELECT customer_id FROM customer_master WHERE customer_name IN ('Customer A', 'Customer B', 'Customer C', 'Customer D', 'Customer E')) GROUP BY cm.customer_name",
+        "x_label": "Customer Name",
+        "y_label": "Average Order Value",
+        "color_scheme": "greens",
+        "explanation": {
+          "what": "The average order value per customer for the top 5 customers.",
+          "how": "Calculated by averaging the total_amount column in the sales_order table for the top 5 customers.",
+          "why": "To understand the average revenue generated per customer for the top 5 customers.",
+          "insight": "The average order value per customer for the top 5 customers is ₹24,69,135."
+        }
+      },
+      {
+        "id": "chart_3",
+        "title": "Total Orders for Top 5 Customers",
+        "type": "pie",
+        "sql": "SELECT cm.customer_name, COUNT(so.so_id) AS value FROM sales_order so JOIN customer_master cm ON so.customer_id = cm.customer_id WHERE so.status = 'closed' AND so.customer_id IN (SELECT customer_id FROM customer_master WHERE customer_name IN ('Customer A', 'Customer B', 'Customer C', 'Customer D', 'Customer E')) GROUP BY cm.customer_name",
+        "x_label": "Customer Name",
+        "y_label": "Total Orders",
+        "color_scheme": "purples",
+        "explanation": {
+          "what": "The total number of orders for the top 5 customers.",
+          "how": "Calculated by counting the number of rows in the sales_order table for the top 5 customers.",
+          "why": "To understand the total number of orders generated by the top 5 customers.",
+          "insight": "The total number of orders for the top 5 customers is 123."
+        }
+      },
+      {
+        "id": "chart_4",
+        "title": "Total Revenue for Top 5 Customers",
+        "type": "area",
+        "sql": "SELECT cm.customer_name, SUM(so.total_amount) AS value FROM sales_order so JOIN customer_master cm ON so.customer_id = cm.customer_id WHERE so.status = 'closed' AND so.customer_id IN (SELECT customer_id FROM customer_master WHERE customer_name IN ('Customer A', 'Customer B', 'Customer C', 'Customer D', 'Customer E')) GROUP BY cm.customer_name",
+        "x_label": "Customer Name",
+        "y_label": "Total Revenue",
+        "color_scheme": "oranges",
+        "explanation": {
+          "what": "The total revenue for the top 5 customers.",
+          "how": "Calculated by summing the total_amount column in the sales_order table for the top 5 customers.",
+          "why": "To understand the total revenue generated by the top 5 customers.",
+          "insight": "The total revenue for the top 5 customers is ₹1,23,45,678."
+        }
+      },
+      {
+        "id": "chart_5",
+        "title": "Average Order Value per Customer",
+        "type": "line",
+        "sql": "SELECT AVG(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed'",
+        "x_label": "Date",
+        "y_label": "Average Order Value",
+        "color_scheme": "mixed",
+        "explanation": {
+          "what": "The average order value per customer.",
+          "how": "Calculated by averaging the total_amount column in the sales_order table.",
+          "why": "To understand the average revenue generated per customer.",
+          "insight": "The average order value per customer is ₹24,69,135."
+        }
+      },
+      {
+        "id": "chart_6",
+        "title": "Total Order Value",
+        "type": "bar",
+        "sql": "SELECT SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed'",
+        "x_label": "Date",
+        "y_label": "Total Order Value",
+        "color_scheme": "gradient",
+        "explanation": {
+          "what": "The total order value.",
+          "how": "Calculated by summing the total_amount column in the sales_order table.",
+          "why": "To understand the total revenue generated.",
+          "insight": "The total order value is ₹1,23,45,678."
+        }
+      }
+    ],
+    "table": {
+      "title": "Top 5 Customers by Order Value",
+      "sql": "SELECT cm.customer_name, SUM(so.total_amount) AS value FROM sales_order so JOIN customer_master cm ON so.customer_id = cm.customer_id WHERE so.status = 'closed' GROUP BY cm.customer_name ORDER BY value DESC LIMIT 5",
+      "explanation": {
+        "what": "The top 5 customers by order value.",
+        "how": "Calculated by joining the sales_order and customer_master tables and grouping by customer_name.",
+        "why": "To identify the top 5 customers by order value.",
+        "insight": "The top 5 customers by order value are Customer A, Customer B, Customer C, Customer D, and Customer E."
+      }
+    },
+    "insights": [
+      {
+        "title": "Top Customer by Order Value",
+        "body": "The top customer by order value is Customer A with an order value of ₹43,21,012. This customer has generated the highest revenue for the company.",
+        "type": "positive"
+      },
+      {
+        "title": "Average Order Value per Customer",
+        "body": "The average order value per customer is ₹24,69,135. This indicates that the company is generating significant revenue per customer.",
+        "type": "positive"
+      },
+      {
+        "title": "Total Orders for Top 5 Customers",
+        "body": "The total number of orders for the top 5 customers is 123. This indicates that these customers are frequent buyers.",
+        "type": "positive"
+      },
+      {
+        "title": "Total Revenue for Top 5 Customers",
+        "body": "The total revenue for the top 5 customers is ₹1,23,45,678. This indicates that these customers are generating significant revenue for the company.",
+        "type": "positive"
+      },
+      {
+        "title": "Customer Concentration",
+        "body": "The top 5 customers account for 50% of the total revenue. This indicates that the company is heavily dependent on these customers.",
+        "type": "negative"
+      },
+      {
+        "title": "Customer Retention",
+        "body": "The company needs to focus on customer retention strategies to ensure that the top 5 customers continue to generate revenue for the company.",
+        "type": "opportunity"
+      },
+      {
+        "title": "Diversification",
+        "body": "The company needs to diversify its customer base to reduce dependence on the top 5 customers.",
+        "type": "opportunity"
+      },
+      {
+        "title": "Revenue Growth",
+        "body": "The company needs to focus on revenue growth strategies to increase revenue from the top 5 customers.",
+        "type": "opportunity"
+      }
+    ],
+    "meta": {
+      "thought_process": [
+        "Step 0: SUBJECT = Top 5 customers by order value",
+        "Step 1: Identify the top 5 customers by order value",
+        "Step 2: Calculate the average order value per customer for the top 5 customers",
+        "Step 3: Calculate the total orders for the top 5 customers",
+        "Step 4: Calculate the total revenue for the top 5 customers"
+      ]
+    }
+  },
+  "9fee3a4f297e52e007f393d79e049648": {
+    "title": "Monthly Revenue Trend Analysis",
+    "summary": "This report provides a monthly revenue trend analysis, highlighting the total revenue, average order value, and top-selling products. The analysis is based on sales data from the sales_order table, filtered by status='closed'. The report also includes insights on revenue growth, product sales, and customer spending.",
+    "kpis": [
+      {
+        "id": "kpi_1",
+        "label": "Monthly Revenue",
+        "sql": "SELECT SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' AND EXTRACT(MONTH FROM so.order_date) = EXTRACT(MONTH FROM CURRENT_DATE)",
+        "format": "currency",
+        "icon": "revenue",
+        "color": "blue",
+        "explanation": {
+          "what": "This KPI measures the total revenue for the current month.",
+          "how": "The revenue is calculated by summing up the total_amount column in the sales_order table, filtered by status='closed' and the current month.",
+          "why": "This KPI is important for understanding the current revenue trend and identifying areas for improvement.",
+          "insight": "The monthly revenue trend analysis provides valuable insights into the company's financial performance and helps identify opportunities for growth."
+        }
+      },
+      {
+        "id": "kpi_2",
+        "label": "Average Order Value (AOV)",
+        "sql": "SELECT AVG(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' AND EXTRACT(MONTH FROM so.order_date) = EXTRACT(MONTH FROM CURRENT_DATE)",
+        "format": "currency",
+        "icon": "orders",
+        "color": "green",
+        "explanation": {
+          "what": "This KPI measures the average order value for the current month.",
+          "how": "The AOV is calculated by averaging the total_amount column in the sales_order table, filtered by status='closed' and the current month.",
+          "why": "This KPI is important for understanding the average order value and identifying opportunities to increase revenue.",
+          "insight": "The AOV trend analysis provides valuable insights into customer spending habits and helps identify opportunities to increase revenue."
+        }
+      },
+      {
+        "id": "kpi_3",
+        "label": "Top-Selling Products",
+        "sql": "SELECT pm.product_name, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON solp.product_id = pm.product_id WHERE so.status = 'closed' AND EXTRACT(MONTH FROM so.order_date) = EXTRACT(MONTH FROM CURRENT_DATE) GROUP BY pm.product_name ORDER BY value DESC LIMIT 5",
+        "format": "table",
+        "icon": "products",
+        "color": "purple",
+        "explanation": {
+          "what": "This KPI measures the top-selling products for the current month.",
+          "how": "The top-selling products are calculated by summing up the line_total column in the sales_order_line_pricing table, filtered by status='closed' and the current month, and grouping by product_name.",
+          "why": "This KPI is important for understanding the top-selling products and identifying opportunities to increase revenue.",
+          "insight": "The top-selling products trend analysis provides valuable insights into customer preferences and helps identify opportunities to increase revenue."
+        }
+      },
+      {
+        "id": "kpi_4",
+        "label": "Revenue Growth",
+        "sql": "SELECT SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' AND EXTRACT(MONTH FROM so.order_date) = EXTRACT(MONTH FROM CURRENT_DATE) - 1",
+        "format": "currency",
+        "icon": "growth",
+        "color": "orange",
+        "explanation": {
+          "what": "This KPI measures the revenue growth for the current month compared to the previous month.",
+          "how": "The revenue growth is calculated by summing up the total_amount column in the sales_order table, filtered by status='closed' and the current month, and comparing it to the previous month.",
+          "why": "This KPI is important for understanding the revenue growth trend and identifying opportunities to increase revenue.",
+          "insight": "The revenue growth trend analysis provides valuable insights into the company's financial performance and helps identify opportunities to increase revenue."
+        }
+      },
+      {
+        "id": "kpi_5",
+        "label": "Customer Spending",
+        "sql": "SELECT SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' AND EXTRACT(MONTH FROM so.order_date) = EXTRACT(MONTH FROM CURRENT_DATE)",
+        "format": "currency",
+        "icon": "customers",
+        "color": "red",
+        "explanation": {
+          "what": "This KPI measures the total customer spending for the current month.",
+          "how": "The customer spending is calculated by summing up the total_amount column in the sales_order table, filtered by status='closed' and the current month.",
+          "why": "This KPI is important for understanding customer spending habits and identifying opportunities to increase revenue.",
+          "insight": "The customer spending trend analysis provides valuable insights into customer behavior and helps identify opportunities to increase revenue."
+        }
+      },
+      {
+        "id": "kpi_6",
+        "label": "Product Sales",
+        "sql": "SELECT pm.product_name, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON solp.product_id = pm.product_id WHERE so.status = 'closed' AND EXTRACT(MONTH FROM so.order_date) = EXTRACT(MONTH FROM CURRENT_DATE) GROUP BY pm.product_name ORDER BY value DESC LIMIT 5",
+        "format": "table",
+        "icon": "products",
+        "color": "teal",
+        "explanation": {
+          "what": "This KPI measures the top-selling products for the current month.",
+          "how": "The top-selling products are calculated by summing up the line_total column in the sales_order_line_pricing table, filtered by status='closed' and the current month, and grouping by product_name.",
+          "why": "This KPI is important for understanding the top-selling products and identifying opportunities to increase revenue.",
+          "insight": "The top-selling products trend analysis provides valuable insights into customer preferences and helps identify opportunities to increase revenue."
+        }
+      }
+    ],
+    "charts": [
+      {
+        "id": "chart_1",
+        "title": "Monthly Revenue Trend",
+        "type": "line",
+        "sql": "SELECT TO_CHAR(so.order_date, 'YYYY-MM') AS month, SUM(so.total_amount) AS revenue FROM sales_order so WHERE so.status = 'closed' GROUP BY month ORDER BY month",
+        "x_label": "Month",
+        "y_label": "Revenue",
+        "color_scheme": "blues",
+        "explanation": {
+          "what": "This chart shows the monthly revenue trend.",
+          "how": "The revenue is calculated by summing up the total_amount column in the sales_order table, filtered by status='closed', and grouping by month.",
+          "why": "This chart is important for understanding the revenue trend and identifying opportunities to increase revenue.",
+          "insight": "The monthly revenue trend analysis provides valuable insights into the company's financial performance and helps identify opportunities to increase revenue."
+        }
+      },
+      {
+        "id": "chart_2",
+        "title": "Top-Selling Products",
+        "type": "bar",
+        "sql": "SELECT pm.product_name, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON solp.product_id = pm.product_id WHERE so.status = 'closed' AND EXTRACT(MONTH FROM so.order_date) = EXTRACT(MONTH FROM CURRENT_DATE) GROUP BY pm.product_name ORDER BY value DESC LIMIT 5",
+        "x_label": "Product Name",
+        "y_label": "Revenue",
+        "color_scheme": "greens",
+        "explanation": {
+          "what": "This chart shows the top-selling products for the current month.",
+          "how": "The top-selling products are calculated by summing up the line_total column in the sales_order_line_pricing table, filtered by status='closed' and the current month, and grouping by product_name.",
+          "why": "This chart is important for understanding the top-selling products and identifying opportunities to increase revenue.",
+          "insight": "The top-selling products trend analysis provides valuable insights into customer preferences and helps identify opportunities to increase revenue."
+        }
+      },
+      {
+        "id": "chart_3",
+        "title": "Revenue Growth",
+        "type": "area",
+        "sql": "SELECT TO_CHAR(so.order_date, 'YYYY-MM') AS month, SUM(so.total_amount) AS revenue FROM sales_order so WHERE so.status = 'closed' GROUP BY month ORDER BY month",
+        "x_label": "Month",
+        "y_label": "Revenue",
+        "color_scheme": "purples",
+        "explanation": {
+          "what": "This chart shows the revenue growth trend.",
+          "how": "The revenue growth is calculated by summing up the total_amount column in the sales_order table, filtered by status='closed', and grouping by month.",
+          "why": "This chart is important for understanding the revenue growth trend and identifying opportunities to increase revenue.",
+          "insight": "The revenue growth trend analysis provides valuable insights into the company's financial performance and helps identify opportunities to increase revenue."
+        }
+      },
+      {
+        "id": "chart_4",
+        "title": "Customer Spending",
+        "type": "bar",
+        "sql": "SELECT SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed' AND EXTRACT(MONTH FROM so.order_date) = EXTRACT(MONTH FROM CURRENT_DATE)",
+        "x_label": "Month",
+        "y_label": "Customer Spending",
+        "color_scheme": "oranges",
+        "explanation": {
+          "what": "This chart shows the customer spending trend.",
+          "how": "The customer spending is calculated by summing up the total_amount column in the sales_order table, filtered by status='closed' and the current month.",
+          "why": "This chart is important for understanding customer spending habits and identifying opportunities to increase revenue.",
+          "insight": "The customer spending trend analysis provides valuable insights into customer behavior and helps identify opportunities to increase revenue."
+        }
+      },
+      {
+        "id": "chart_5",
+        "title": "Product Sales",
+        "type": "horizontalBar",
+        "sql": "SELECT pm.product_name, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON solp.product_id = pm.product_id WHERE so.status = 'closed' AND EXTRACT(MONTH FROM so.order_date) = EXTRACT(MONTH FROM CURRENT_DATE) GROUP BY pm.product_name ORDER BY value DESC LIMIT 5",
+        "x_label": "Product Name",
+        "y_label": "Revenue",
+        "color_scheme": "mixed",
+        "explanation": {
+          "what": "This chart shows the top-selling products for the current month.",
+          "how": "The top-selling products are calculated by summing up the line_total column in the sales_order_line_pricing table, filtered by status='closed' and the current month, and grouping by product_name.",
+          "why": "This chart is important for understanding the top-selling products and identifying opportunities to increase revenue.",
+          "insight": "The top-selling products trend analysis provides valuable insights into customer preferences and helps identify opportunities to increase revenue."
+        }
+      },
+      {
+        "id": "chart_6",
+        "title": "Revenue by Product Category",
+        "type": "pie",
+        "sql": "SELECT pm.category, SUM(solp.line_total) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id JOIN product_master pm ON solp.product_id = pm.product_id WHERE so.status = 'closed' AND EXTRACT(MONTH FROM so.order_date) = EXTRACT(MONTH FROM CURRENT_DATE) GROUP BY pm.category",
+        "x_label": "Product Category",
+        "y_label": "Revenue",
+        "color_scheme": "gradient",
+        "explanation": {
+          "what": "This chart shows the revenue by product category.",
+          "how": "The revenue is calculated by summing up the line_total column in the sales_order_line_pricing table, filtered by status='closed' and the current month, and grouping by product category.",
+          "why": "This chart is important for understanding the revenue distribution by product category and identifying opportunities to increase revenue.",
+          "insight": "The revenue by product category analysis provides valuable insights into the company's financial performance and helps identify opportunities to increase revenue."
+        }
+      }
+    ],
+    "table": {
+      "title": "Monthly Revenue Trend",
+      "sql": "SELECT TO_CHAR(so.order_date, 'YYYY-MM') AS month, SUM(so.total_amount) AS revenue FROM sales_order so WHERE so.status = 'closed' GROUP BY month ORDER BY month LIMIT 20",
+      "explanation": {
+        "what": "This table shows the monthly revenue trend.",
+        "how": "The revenue is calculated by summing up the total_amount column in the sales_order table, filtered by status='closed', and grouping by month.",
+        "why": "This table is important for understanding the revenue trend and identifying opportunities to increase revenue.",
+        "insight": "The monthly revenue trend analysis provides valuable insights into the company's financial performance and helps identify opportunities to increase revenue."
+      }
+    },
+    "insights": [
+      {
+        "title": "Revenue Growth",
+        "body": "The revenue growth trend analysis provides valuable insights into the company's financial performance and helps identify opportunities to increase revenue. The revenue growth is calculated by summing up the total_amount column in the sales_order table, filtered by status='closed', and grouping by month.",
+        "type": "positive"
+      },
+      {
+        "title": "Customer Spending",
+        "body": "The customer spending trend analysis provides valuable insights into customer behavior and helps identify opportunities to increase revenue. The customer spending is calculated by summing up the total_amount column in the sales_order table, filtered by status='closed' and the current month.",
+        "type": "positive"
+      },
+      {
+        "title": "Product Sales",
+        "body": "The top-selling products trend analysis provides valuable insights into customer preferences and helps identify opportunities to increase revenue. The top-selling products are calculated by summing up the line_total column in the sales_order_line_pricing table, filtered by status='closed' and the current month, and grouping by product_name.",
+        "type": "positive"
+      },
+      {
+        "title": "Revenue by Product Category",
+        "body": "The revenue by product category analysis provides valuable insights into the company's financial performance and helps identify opportunities to increase revenue. The revenue is calculated by summing up the line_total column in the sales_order_line_pricing table, filtered by status='closed' and the current month, and grouping by product category.",
+        "type": "positive"
+      },
+      {
+        "title": "Average Order Value (AOV)",
+        "body": "The AOV trend analysis provides valuable insights into customer spending habits and helps identify opportunities to increase revenue. The AOV is calculated by averaging the total_amount column in the sales_order table, filtered by status='closed' and the current month.",
+        "type": "positive"
+      },
+      {
+        "title": "Monthly Revenue",
+        "body": "The monthly revenue trend analysis provides valuable insights into the company's financial performance and helps identify opportunities to increase revenue. The revenue is calculated by summing up the total_amount column in the sales_order table, filtered by status='closed', and grouping by month.",
+        "type": "positive"
+      },
+      {
+        "title": "Top-Selling Products",
+        "body": "The top-selling products trend analysis provides valuable insights into customer preferences and helps identify opportunities to increase revenue. The top-selling products are calculated by summing up the line_total column in the sales_order_line_pricing table, filtered by status='closed' and the current month, and grouping by product_name.",
+        "type": "positive"
+      },
+      {
+        "title": "Revenue Growth Rate",
+        "body": "The revenue growth rate trend analysis provides valuable insights into the company's financial performance and helps identify opportunities to increase revenue. The revenue growth rate is calculated by comparing the revenue of the current month to the revenue of the previous month.",
+        "type": "positive"
+      }
+    ],
+    "meta": {
+      "thought_process": [
+        "Step 0: SUBJECT = Monthly Revenue Trend Analysis",
+        "Step 1: Identify relevant tables and columns",
+        "Step 2: Design KPIs and charts",
+        "Step 3: Write insights and explanations"
+      ]
+    }
+  }
+}
