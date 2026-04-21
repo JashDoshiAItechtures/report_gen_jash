@@ -414,6 +414,55 @@ def relationships_endpoint():
     ]
 
 
+# ── Server-side report cache ────────────────────────────────────────────
+# Stores generated report data in memory so the report viewer tab can
+# fetch it via API — avoids browser storage issues inside HF Spaces iframes.
+import time as _time
+_report_cache: dict[str, dict] = {}
+_REPORT_CACHE_TTL = 3600  # 1 hour
+
+
+class ReportCacheStoreRequest(BaseModel):
+    report_id: str
+    data: dict
+    question: str = "Report"
+    provider: str = "groq"
+    theme: str = "light"
+
+
+@app.post("/report/cache/store")
+def report_cache_store(req: ReportCacheStoreRequest):
+    """Store report data server-side for cross-tab retrieval."""
+    _report_cache[req.report_id] = {
+        "data": req.data,
+        "question": req.question,
+        "provider": req.provider,
+        "theme": req.theme,
+        "ts": _time.time(),
+    }
+    # Evict stale entries
+    now = _time.time()
+    stale = [k for k, v in _report_cache.items() if now - v["ts"] > _REPORT_CACHE_TTL]
+    for k in stale:
+        del _report_cache[k]
+    return {"ok": True}
+
+
+@app.get("/report/cache/{report_id}")
+def report_cache_get(report_id: str):
+    """Retrieve cached report data by ID."""
+    entry = _report_cache.get(report_id)
+    if not entry:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Report not found in cache")
+    return {
+        "data": entry["data"],
+        "question": entry["question"],
+        "provider": entry["provider"],
+        "theme": entry["theme"],
+    }
+
+
 # ── Frontend static files ──────────────────────────────────────────────────
 
 FRONTEND_DIR = Path(__file__).parent / "frontend"

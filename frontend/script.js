@@ -442,13 +442,27 @@
                 const reportId = isModification && latestReportId ? latestReportId : "rpt_" + Date.now();
                 latestReportId = reportId;
 
-                localStorage.setItem(reportId, JSON.stringify(data));
-                // Preserve the original report question — don't overwrite with the modification command
-                if (!isModification) {
-                    localStorage.setItem(reportId + "_question", question);
-                }
-                localStorage.setItem(reportId + "_provider", selectedProvider);
-                localStorage.setItem(reportId + "_theme", document.documentElement.getAttribute("data-theme") || "light");
+                // Store report data server-side (cross-tab safe), then open tab
+                fetch("/report/cache/store", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        report_id: reportId,
+                        data: data,
+                        question: isModification ? (localStorage.getItem("_rpt_q_" + reportId) || question) : question,
+                        provider: selectedProvider,
+                        theme: document.documentElement.getAttribute("data-theme") || "light",
+                    }),
+                }).then(() => {
+                    // Open new tab or refresh existing one AFTER cache is stored
+                    if (isModification && reportWindow && !reportWindow.closed) {
+                        reportWindow.location.href = `/report-view?id=${reportId}&t=${Date.now()}`;
+                        reportWindow.focus();
+                    } else {
+                        reportWindow = window.open(`/report-view?id=${reportId}`, "_blank");
+                    }
+                }).catch(e => console.warn("Cache store failed:", e));
+                if (!isModification) localStorage.setItem("_rpt_q_" + reportId, question);
 
                 // Only update UI if still on the same conversation
                 if (currentConvId === capturedConvId) {
@@ -461,14 +475,6 @@
                     scrollToBottom();
                 } else {
                     typingEl.remove();
-                }
-
-                // Open new tab or refresh existing one
-                if (isModification && reportWindow && !reportWindow.closed) {
-                    reportWindow.location.href = `/report-view?id=${reportId}&t=${Date.now()}`;
-                    reportWindow.focus();
-                } else {
-                    reportWindow = window.open(`/report-view?id=${reportId}`, "_blank");
                 }
             })
             .catch(err => {
@@ -655,11 +661,18 @@
 
             const reportData = await res.json();
 
-            // Store report data in localStorage (shared across tabs)
-            localStorage.setItem(reportId, JSON.stringify(reportData));
-            localStorage.setItem(reportId + "_question", question);
-            localStorage.setItem(reportId + "_provider", selectedProvider);
-            localStorage.setItem(reportId + "_theme", document.documentElement.getAttribute("data-theme") || "light");
+            // Store report data server-side (cross-tab safe) — must finish before opening tab
+            await fetch("/report/cache/store", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    report_id: reportId,
+                    data: reportData,
+                    question: question,
+                    provider: selectedProvider,
+                    theme: document.documentElement.getAttribute("data-theme") || "light",
+                }),
+            });
 
             // Update button to "Open Report"
             btn.disabled = false;
