@@ -17,8 +17,8 @@
         return;
     }
 
-    // ── Retrieve data from sessionStorage ─────────────────────────────────
-    const raw = sessionStorage.getItem(reportId);
+    // ── Retrieve data from localStorage (shared across tabs) ──────────────
+    const raw = localStorage.getItem(reportId);
     if (!raw) {
         document.getElementById("reportContent").innerHTML =
             '<div class="report-loading"><div class="report-loading-text">Report data not found. Please generate the report again from the chat.</div></div>';
@@ -26,8 +26,8 @@
     }
 
     const reportData = JSON.parse(raw);
-    const question = sessionStorage.getItem(reportId + "_question") || "Report";
-    const theme = sessionStorage.getItem(reportId + "_theme") || "light";
+    const question = localStorage.getItem(reportId + "_question") || "Report";
+    const theme = localStorage.getItem(reportId + "_theme") || "light";
 
     // Apply the theme from the parent page
     document.documentElement.setAttribute("data-theme", theme);

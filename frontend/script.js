@@ -442,13 +442,13 @@
                 const reportId = isModification && latestReportId ? latestReportId : "rpt_" + Date.now();
                 latestReportId = reportId;
 
-                sessionStorage.setItem(reportId, JSON.stringify(data));
+                localStorage.setItem(reportId, JSON.stringify(data));
                 // Preserve the original report question — don't overwrite with the modification command
                 if (!isModification) {
-                    sessionStorage.setItem(reportId + "_question", question);
+                    localStorage.setItem(reportId + "_question", question);
                 }
-                sessionStorage.setItem(reportId + "_provider", selectedProvider);
-                sessionStorage.setItem(reportId + "_theme", document.documentElement.getAttribute("data-theme") || "light");
+                localStorage.setItem(reportId + "_provider", selectedProvider);
+                localStorage.setItem(reportId + "_theme", document.documentElement.getAttribute("data-theme") || "light");
 
                 // Only update UI if still on the same conversation
                 if (currentConvId === capturedConvId) {
@@ -655,11 +655,11 @@
 
             const reportData = await res.json();
 
-            // Store report data in sessionStorage
-            sessionStorage.setItem(reportId, JSON.stringify(reportData));
-            sessionStorage.setItem(reportId + "_question", question);
-            sessionStorage.setItem(reportId + "_provider", selectedProvider);
-            sessionStorage.setItem(reportId + "_theme", document.documentElement.getAttribute("data-theme") || "light");
+            // Store report data in localStorage (shared across tabs)
+            localStorage.setItem(reportId, JSON.stringify(reportData));
+            localStorage.setItem(reportId + "_question", question);
+            localStorage.setItem(reportId + "_provider", selectedProvider);
+            localStorage.setItem(reportId + "_theme", document.documentElement.getAttribute("data-theme") || "light");
 
             // Update button to "Open Report"
             btn.disabled = false;
