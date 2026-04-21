@@ -438,31 +438,9 @@
                 // Store the report data for future modifications
                 latestReportData = data.report;
 
-                // Use same report ID if modifying (replaces in sessionStorage)
-                const reportId = isModification && latestReportId ? latestReportId : "rpt_" + Date.now();
+                // Use server-returned report_id (already cached on server)
+                const reportId = data.report_id || ("rpt_" + Date.now());
                 latestReportId = reportId;
-
-                // Store report data server-side (cross-tab safe), then open tab
-                fetch("/report/cache/store", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        report_id: reportId,
-                        data: data,
-                        question: isModification ? (localStorage.getItem("_rpt_q_" + reportId) || question) : question,
-                        provider: selectedProvider,
-                        theme: document.documentElement.getAttribute("data-theme") || "light",
-                    }),
-                }).then(() => {
-                    // Open new tab or refresh existing one AFTER cache is stored
-                    if (isModification && reportWindow && !reportWindow.closed) {
-                        reportWindow.location.href = `/report-view?id=${reportId}&t=${Date.now()}`;
-                        reportWindow.focus();
-                    } else {
-                        reportWindow = window.open(`/report-view?id=${reportId}`, "_blank");
-                    }
-                }).catch(e => console.warn("Cache store failed:", e));
-                if (!isModification) localStorage.setItem("_rpt_q_" + reportId, question);
 
                 // Only update UI if still on the same conversation
                 if (currentConvId === capturedConvId) {
@@ -475,6 +453,14 @@
                     scrollToBottom();
                 } else {
                     typingEl.remove();
+                }
+
+                // Open new tab or refresh existing one
+                if (isModification && reportWindow && !reportWindow.closed) {
+                    reportWindow.location.href = `/report-view?id=${reportId}&t=${Date.now()}`;
+                    reportWindow.focus();
+                } else {
+                    reportWindow = window.open(`/report-view?id=${reportId}`, "_blank");
                 }
             })
             .catch(err => {
@@ -661,18 +647,8 @@
 
             const reportData = await res.json();
 
-            // Store report data server-side (cross-tab safe) — must finish before opening tab
-            await fetch("/report/cache/store", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    report_id: reportId,
-                    data: reportData,
-                    question: question,
-                    provider: selectedProvider,
-                    theme: document.documentElement.getAttribute("data-theme") || "light",
-                }),
-            });
+            // Server already cached the report — use the report_id from response
+            const serverReportId = reportData.report_id || reportId;
 
             // Update button to "Open Report"
             btn.disabled = false;
@@ -685,11 +661,11 @@
 
             // Re-wire to only open the report (not regenerate)
             btn.onclick = () => {
-                window.open(`/report-view?id=${reportId}`, "_blank");
+                window.open(`/report-view?id=${serverReportId}`, "_blank");
             };
 
             // Auto-open the report
-            window.open(`/report-view?id=${reportId}`, "_blank");
+            window.open(`/report-view?id=${serverReportId}`, "_blank");
 
         } catch (err) {
             btn.disabled = false;

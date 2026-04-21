@@ -269,7 +269,21 @@ def report_endpoint(req: ReportRequest):
 
     logger.info("REPORT request | question=%s | filters=%s", req.question, filter_ctx or "none")
     pipeline = ReportPipeline(provider=req.provider)
-    return pipeline.generate(question_with_filters, force_refresh=req.force_refresh)
+    result = pipeline.generate(question_with_filters, force_refresh=req.force_refresh)
+
+    # Auto-cache the result server-side for the report viewer tab
+    report_id = f"rpt_{int(_time.time() * 1000)}"
+    _report_cache[report_id] = {
+        "data": result,
+        "question": req.question,
+        "provider": req.provider,
+        "theme": "light",
+        "ts": _time.time(),
+    }
+    # Include report_id in response so frontend can open the viewer
+    if isinstance(result, dict):
+        result["report_id"] = report_id
+    return result
 
 
 @app.post("/report/apply-filters")
@@ -307,7 +321,20 @@ def report_modify_endpoint(req: ReportModifyRequest):
 
     logger.info("REPORT MODIFY | command=%s", req.modification)
     pipeline = ReportPipeline(provider=req.provider)
-    return pipeline.modify(req.report_json, req.modification)
+    result = pipeline.modify(req.report_json, req.modification)
+
+    # Auto-cache the modified result
+    report_id = f"rpt_{int(_time.time() * 1000)}"
+    _report_cache[report_id] = {
+        "data": result,
+        "question": "Modified Report",
+        "provider": req.provider,
+        "theme": "light",
+        "ts": _time.time(),
+    }
+    if isinstance(result, dict):
+        result["report_id"] = report_id
+    return result
 
 
 # ── Filter values endpoint ──────────────────────────────────────────────────
