@@ -269,21 +269,7 @@ def report_endpoint(req: ReportRequest):
 
     logger.info("REPORT request | question=%s | filters=%s", req.question, filter_ctx or "none")
     pipeline = ReportPipeline(provider=req.provider)
-    result = pipeline.generate(question_with_filters, force_refresh=req.force_refresh)
-
-    # Auto-cache the result server-side for the report viewer tab
-    report_id = f"rpt_{int(_time.time() * 1000)}"
-    _report_cache[report_id] = {
-        "data": result,
-        "question": req.question,
-        "provider": req.provider,
-        "theme": "light",
-        "ts": _time.time(),
-    }
-    # Include report_id in response so frontend can open the viewer
-    if isinstance(result, dict):
-        result["report_id"] = report_id
-    return result
+    return pipeline.generate(question_with_filters, force_refresh=req.force_refresh)
 
 
 @app.post("/report/apply-filters")
@@ -321,20 +307,7 @@ def report_modify_endpoint(req: ReportModifyRequest):
 
     logger.info("REPORT MODIFY | command=%s", req.modification)
     pipeline = ReportPipeline(provider=req.provider)
-    result = pipeline.modify(req.report_json, req.modification)
-
-    # Auto-cache the modified result
-    report_id = f"rpt_{int(_time.time() * 1000)}"
-    _report_cache[report_id] = {
-        "data": result,
-        "question": "Modified Report",
-        "provider": req.provider,
-        "theme": "light",
-        "ts": _time.time(),
-    }
-    if isinstance(result, dict):
-        result["report_id"] = report_id
-    return result
+    return pipeline.modify(req.report_json, req.modification)
 
 
 # ── Filter values endpoint ──────────────────────────────────────────────────
@@ -439,55 +412,6 @@ def relationships_endpoint():
         }
         for r in rels
     ]
-
-
-# ── Server-side report cache ────────────────────────────────────────────
-# Stores generated report data in memory so the report viewer tab can
-# fetch it via API — avoids browser storage issues inside HF Spaces iframes.
-import time as _time
-_report_cache: dict[str, dict] = {}
-_REPORT_CACHE_TTL = 3600  # 1 hour
-
-
-class ReportCacheStoreRequest(BaseModel):
-    report_id: str
-    data: dict
-    question: str = "Report"
-    provider: str = "groq"
-    theme: str = "light"
-
-
-@app.post("/report/cache/store")
-def report_cache_store(req: ReportCacheStoreRequest):
-    """Store report data server-side for cross-tab retrieval."""
-    _report_cache[req.report_id] = {
-        "data": req.data,
-        "question": req.question,
-        "provider": req.provider,
-        "theme": req.theme,
-        "ts": _time.time(),
-    }
-    # Evict stale entries
-    now = _time.time()
-    stale = [k for k, v in _report_cache.items() if now - v["ts"] > _REPORT_CACHE_TTL]
-    for k in stale:
-        del _report_cache[k]
-    return {"ok": True}
-
-
-@app.get("/report/cache/{report_id}")
-def report_cache_get(report_id: str):
-    """Retrieve cached report data by ID."""
-    entry = _report_cache.get(report_id)
-    if not entry:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Report not found in cache")
-    return {
-        "data": entry["data"],
-        "question": entry["question"],
-        "provider": entry["provider"],
-        "theme": entry["theme"],
-    }
 
 
 # ── Frontend static files ──────────────────────────────────────────────────

@@ -17,7 +17,7 @@ from ai.groq_setup import get_lm
 from ai.report_signatures import ReportGeneration, ReportModification
 from ai.validator import validate_sql, check_sql_against_schema
 from ai.sql_pattern_checker import check_sql_patterns, format_issues_for_repair
-from ai.signatures import SQLRepair
+from ai.signatures import SQLRepair, AnalyzeAndPlan, SQLGeneration
 from db.schema import format_schema, get_schema
 from db.relationships import format_relationships
 from db.profiler import get_data_profile
@@ -766,6 +766,12 @@ class ReportPipeline:
         self.report_gen = dspy.Predict(ReportGeneration)
         self.report_mod = dspy.Predict(ReportModification)
         self.repair = dspy.Predict(SQLRepair)
+        # Chat pipeline modules for SQL quality improvement
+        self.analyze = dspy.Predict(AnalyzeAndPlan)
+        self.sql_gen = dspy.Predict(SQLGeneration)
+        # Per-report regeneration counter to prevent getting stuck
+        self._regen_count = 0
+        self._MAX_REGEN_PER_REPORT = 3
 
     # ── Shared SQL validation + execution (mirrors SQLAnalystPipeline) ──
 
@@ -786,7 +792,7 @@ class ReportPipeline:
         sql = sql.rstrip(";")
         return sql
 
-    def _validate_and_execute_sql(self, sql: str, context: str = "report") -> tuple:
+    def _validate_and_execute_sql(self, sql: str, context: str = "report", sql_description: str = "") -> tuple:
         """Validate and execute SQL using the same pipeline as SQL Chat.
 
         Applies the full validation chain:
@@ -857,6 +863,25 @@ class ReportPipeline:
                 logger.error("[%s] Repair attempt %d failed: %s", context, attempt + 1, exc)
                 break
 
+        # ── Final fallback: full SQL regeneration via chat pipeline ─────
+        if not result["success"] and sql_description and self._regen_count < self._MAX_REGEN_PER_REPORT:
+            self._regen_count += 1
+            logger.info("[%s] Repair failed — attempting full SQL regeneration (%d/%d)",
+                        context, self._regen_count, self._MAX_REGEN_PER_REPORT)
+            new_sql = self._regenerate_sql(sql_description)
+            if new_sql:
+                is_safe, reason = validate_sql(new_sql)
+                if is_safe:
+                    regen_result = execute_sql(new_sql)
+                    if regen_result["success"]:
+                        logger.info("[%s] SQL regeneration succeeded", context)
+                        return new_sql, regen_result
+                    else:
+                        logger.warning("[%s] Regenerated SQL also failed: %s", context, regen_result["error"])
+        elif not result["success"] and sql_description and self._regen_count >= self._MAX_REGEN_PER_REPORT:
+            logger.warning("[%s] Skipping regeneration — limit reached (%d/%d)",
+                           context, self._regen_count, self._MAX_REGEN_PER_REPORT)
+
         return sql, result
 
     @staticmethod
@@ -871,6 +896,96 @@ class ReportPipeline:
             f"'This year' = {current_year} ({current_year}-01-01 to {current_year}-12-31).]\n\n"
             f"{question}"
         )
+
+    def _pre_analyze_query(self, question: str, schema_str: str,
+                           rels_str: str, profile_str: str) -> str:
+        """Use the chat pipeline's AnalyzeAndPlan to produce a SQL generation guide.
+
+        This gives the report LLM concrete, schema-verified guidance for
+        writing correct SQL queries without affecting the report structure.
+        Returns a text block to append to the LLM prompt.
+        """
+        try:
+            question_with_date = self._build_question_with_context(question)
+            plan = self.analyze(
+                question=question_with_date,
+                schema_info=schema_str,
+                relationships=rels_str,
+                data_profile=profile_str,
+            )
+
+            guide = [
+                "",
+                "══════════════════════════════════════════════════",
+                "📋 SQL GENERATION GUIDE (use for ALL SQL queries in the report)",
+                "══════════════════════════════════════════════════",
+                f"Analysis intent: {plan.intent}",
+                f"Relevant tables: {plan.relevant_tables}",
+                f"Relevant columns: {plan.relevant_columns}",
+                f"Join conditions: {plan.join_conditions}",
+                f"Where conditions: {plan.where_conditions}",
+                f"Aggregations: {plan.aggregations}",
+                f"Group by: {plan.group_by}",
+                "",
+                "⚠ Use ONLY the tables and columns listed above in your SQL.",
+                "⚠ Follow the join conditions EXACTLY as specified.",
+                "⚠ Apply the where conditions in ALL SQL queries.",
+                "⚠ Adapt these for each KPI/chart but keep tables and joins correct.",
+                "══════════════════════════════════════════════════",
+            ]
+
+            result = "\n".join(guide)
+            logger.info("Pre-analysis SQL guide generated (%d chars)", len(result))
+            return result
+        except Exception as exc:
+            logger.warning("Pre-analysis failed (non-fatal, continuing without guide): %s", exc)
+            return ""
+
+    def _regenerate_sql(self, sql_description: str) -> str | None:
+        """Regenerate a SQL query using the chat pipeline's full chain.
+
+        Used as a last resort when auto-fix and repair both fail.
+        Uses AnalyzeAndPlan → SQLGeneration (same chain as SQL chat).
+        """
+        try:
+            schema_str = getattr(self, '_report_schema_str', None) or format_schema()
+            rels_str = getattr(self, '_report_rels_str', None) or format_relationships()
+            profile_str = getattr(self, '_report_profile_str', None) or get_data_profile()
+
+            question_with_date = self._build_question_with_context(sql_description)
+
+            plan = self.analyze(
+                question=question_with_date,
+                schema_info=schema_str,
+                relationships=rels_str,
+                data_profile=profile_str,
+            )
+
+            plan_text = (
+                f"Intent: {plan.intent}\n"
+                f"Tables: {plan.relevant_tables}\n"
+                f"Columns: {plan.relevant_columns}\n"
+                f"Joins: {plan.join_conditions}\n"
+                f"Where: {plan.where_conditions}\n"
+                f"Aggregations: {plan.aggregations}\n"
+                f"Group By: {plan.group_by}\n"
+                f"Order By: {plan.order_by}\n"
+                f"Limit: {plan.limit_val}"
+            )
+
+            sql_result = self.sql_gen(
+                question=question_with_date,
+                schema_info=schema_str,
+                query_plan=plan_text,
+            )
+
+            sql = self._clean_sql(sql_result.sql_query)
+            sql = _fix_report_sql(sql)
+            logger.info("SQL regenerated via chat pipeline: %s", sql[:200])
+            return sql
+        except Exception as exc:
+            logger.warning("SQL regeneration via chat pipeline failed: %s", exc)
+            return None
 
     @staticmethod
     def _repair_json(text: str) -> str:
@@ -1000,7 +1115,11 @@ class ReportPipeline:
             kpi["error"] = "No SQL provided"
             return kpi
 
-        sql, result = self._validate_and_execute_sql(sql, context=f"KPI:{kpi.get('label', kpi.get('id', '?'))}")
+        kpi_label = kpi.get("label", kpi.get("id", "?"))
+        sql, result = self._validate_and_execute_sql(
+            sql, context=f"KPI:{kpi_label}",
+            sql_description=f"Calculate a single numeric value for: {kpi_label}",
+        )
         kpi["sql"] = sql  # store corrected SQL
 
         if not result["success"]:
@@ -1044,7 +1163,11 @@ class ReportPipeline:
             chart["error"] = "No SQL provided"
             return chart
 
-        sql, result = self._validate_and_execute_sql(sql, context=f"Chart:{chart.get('title', chart.get('id', '?'))}")
+        chart_title = chart.get("title", chart.get("id", "?"))
+        sql, result = self._validate_and_execute_sql(
+            sql, context=f"Chart:{chart_title}",
+            sql_description=f"Query data for chart: {chart_title}. Return rows with a label column and a value column.",
+        )
         chart["sql"] = sql  # store corrected SQL
 
         if not result["success"]:
@@ -1062,7 +1185,11 @@ class ReportPipeline:
             table["data"] = []
             return table
 
-        sql, result = self._validate_and_execute_sql(sql, context="DetailTable")
+        table_title = table.get("title", "Detail table")
+        sql, result = self._validate_and_execute_sql(
+            sql, context="DetailTable",
+            sql_description=f"Query detail data for: {table_title}",
+        )
         table["sql"] = sql  # store corrected SQL
 
         if not result["success"]:
@@ -1192,6 +1319,12 @@ class ReportPipeline:
         rels_str = format_relationships()
         profile_str = get_data_profile()
 
+        # Store context for SQL regeneration fallback
+        self._report_schema_str = schema_str
+        self._report_rels_str = rels_str
+        self._report_profile_str = profile_str
+        self._regen_count = 0  # reset per-report regeneration counter
+
         cache_key = self._cache_key(question)
 
         # ── Per-key lock: prevents duplicate LLM calls when two users
@@ -1209,6 +1342,14 @@ class ReportPipeline:
                 if subject_lock:
                     question_with_date = subject_lock + "\n\n" + question_with_date
                     logger.info("Subject lock prepended to question (%d chars)", len(subject_lock))
+
+                # ── Pre-analyze query using chat pipeline for SQL guidance ──
+                sql_guide = self._pre_analyze_query(
+                    question, schema_str, rels_str, profile_str
+                )
+                if sql_guide:
+                    question_with_date = question_with_date + "\n" + sql_guide
+                    logger.info("SQL guide appended to question (%d chars)", len(sql_guide))
 
                 logger.info("Report generation — calling LLM for report blueprint (cache MISS)")
                 logger.info("Question sent to LLM (first 500 chars): %s", question_with_date[:500])
@@ -1479,26 +1620,25 @@ class ReportPipeline:
 
     @staticmethod
     def _enforce_chart_diversity(charts: list) -> list:
-        """Ensure chart types are appropriate for the data and diverse.
+        """Ensure chart types are diverse — no type used more than 2 times.
 
         Rules:
         - Never use polarArea or radar (unreadable with business data)
-        - Time-series data (dates in labels) → line or area
+        - No chart type may appear more than MAX_PER_TYPE times
+        - Time-series data (dates in labels) → line or area preferred,
+          but excess time-series get converted to bar/stackedBar
         - Proportions/shares (≤8 items) → pie or doughnut
         - Comparisons (>8 items) → horizontalBar
         - Comparisons (≤8 items) → bar
-        - Trends with multiple series → stackedBar or area
-        - No two charts should use the same type unless necessary
         """
-        # Preferred types in order (no polarArea, no radar)
+        MAX_PER_TYPE = 2  # hard cap: no type more than 2 times
+
         GOOD_TYPES = ["bar", "line", "pie", "doughnut", "horizontalBar", "stackedBar", "area"]
 
         TIME_KEYWORDS = ["trend", "growth", "over time", "monthly", "weekly", "daily",
                          "quarterly", "yearly", "timeline", "history", "date", "period"]
         PROPORTION_KEYWORDS = ["distribution", "share", "breakdown", "composition",
                                "by category", "by type", "proportion", "split", "mix"]
-        COMPARISON_KEYWORDS = ["top", "ranking", "comparison", "versus", "vs",
-                               "best", "worst", "highest", "lowest"]
 
         def _has_date_labels(chart):
             """Check if the chart's data labels look like dates."""
@@ -1518,86 +1658,91 @@ class ReportPipeline:
                         return True
             return False
 
-        def _infer_best_type(chart, used_types):
-            """Pick the best chart type based on title, data shape, and what's used."""
+        def _type_available(t, type_counts):
+            """Check if a chart type hasn't reached the max limit."""
+            return type_counts.get(t, 0) < MAX_PER_TYPE
+
+        def _infer_best_type(chart, type_counts):
+            """Pick the best chart type based on title, data shape, and usage counts."""
             title = (chart.get("title") or "").lower()
             data = chart.get("data", [])
             num_rows = len(data)
             num_cols = len(data[0].keys()) if data else 0
 
-            # Time-series → line or area
+            # Time-series → prefer line or area, but fall through to others if maxed
             if _has_date_labels(chart) or any(kw in title for kw in TIME_KEYWORDS):
-                for t in ["line", "area"]:
-                    if t not in used_types:
+                for t in ["line", "area", "bar", "stackedBar"]:
+                    if _type_available(t, type_counts):
                         return t
-                return "line"
 
             # Proportions → pie or doughnut
             if any(kw in title for kw in PROPORTION_KEYWORDS) and num_rows <= 10:
-                for t in ["pie", "doughnut"]:
-                    if t not in used_types:
+                for t in ["pie", "doughnut", "bar", "horizontalBar"]:
+                    if _type_available(t, type_counts):
                         return t
-                for t in ["bar", "horizontalBar"]:
-                    if t not in used_types:
-                        return t
-                return "doughnut"
 
-            # Many categories → horizontalBar
+            # Many categories → horizontalBar or bar
             if num_rows > 8:
-                if "horizontalBar" not in used_types:
-                    return "horizontalBar"
-                if "bar" not in used_types:
-                    return "bar"
+                for t in ["horizontalBar", "bar", "stackedBar"]:
+                    if _type_available(t, type_counts):
+                        return t
 
             # Multiple value columns → stackedBar
             if num_cols >= 3:
-                if "stackedBar" not in used_types:
+                if _type_available("stackedBar", type_counts):
                     return "stackedBar"
 
-            # Default: pick first unused good type
+            # Default: pick first available good type
             for t in GOOD_TYPES:
-                if t not in used_types:
+                if _type_available(t, type_counts):
                     return t
 
+            # Absolute fallback (all types at max — very unlikely with 7 types × 2 = 14 slots)
             return "bar"
 
-        used_types = set()
+        from collections import Counter
+        type_counts = Counter()
         result = []
 
         for chart in charts:
             original_type = (chart.get("type") or "bar").lower()
 
-            # Force-replace bad chart types
+            # Force-replace banned chart types
             if original_type in ("polararea", "polarArea", "radar"):
-                new_type = _infer_best_type(chart, used_types)
+                new_type = _infer_best_type(chart, type_counts)
                 chart["type"] = new_type
-                used_types.add(new_type)
+                type_counts[new_type] += 1
                 logger.info(
                     "Chart fix: replaced '%s' with '%s' for '%s'",
                     original_type, new_type, chart.get("title", "?"),
                 )
                 result.append(chart)
-            elif original_type in used_types:
-                # Duplicate type — reassign, but protect pie↔doughnut
-                if original_type == "pie" and "doughnut" not in used_types:
+            elif not _type_available(original_type, type_counts):
+                # Type has reached the max — must reassign
+                if original_type == "pie" and _type_available("doughnut", type_counts):
                     chart["type"] = "doughnut"
-                    used_types.add("doughnut")
+                    type_counts["doughnut"] += 1
                     logger.info("Chart diversity: pie → doughnut for '%s'", chart.get("title", "?"))
-                elif original_type == "doughnut" and "pie" not in used_types:
+                elif original_type == "doughnut" and _type_available("pie", type_counts):
                     chart["type"] = "pie"
-                    used_types.add("pie")
+                    type_counts["pie"] += 1
                     logger.info("Chart diversity: doughnut → pie for '%s'", chart.get("title", "?"))
+                elif original_type in ("line", "area") and _type_available("area" if original_type == "line" else "line", type_counts):
+                    swap = "area" if original_type == "line" else "line"
+                    chart["type"] = swap
+                    type_counts[swap] += 1
+                    logger.info("Chart diversity: %s → %s for '%s'", original_type, swap, chart.get("title", "?"))
                 else:
-                    new_type = _infer_best_type(chart, used_types)
+                    new_type = _infer_best_type(chart, type_counts)
                     chart["type"] = new_type
-                    used_types.add(new_type)
+                    type_counts[new_type] += 1
                     logger.info(
-                        "Chart diversity: changed duplicate '%s' to '%s' for '%s'",
-                        original_type, new_type, chart.get("title", "?"),
+                        "Chart diversity: changed '%s' (at max %d) to '%s' for '%s'",
+                        original_type, MAX_PER_TYPE, new_type, chart.get("title", "?"),
                     )
                 result.append(chart)
             else:
-                used_types.add(original_type)
+                type_counts[original_type] += 1
                 result.append(chart)
 
         return result

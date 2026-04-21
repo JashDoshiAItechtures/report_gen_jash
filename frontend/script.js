@@ -438,9 +438,17 @@
                 // Store the report data for future modifications
                 latestReportData = data.report;
 
-                // Use server-returned report_id (already cached on server)
-                const reportId = data.report_id || ("rpt_" + Date.now());
+                // Use same report ID if modifying (replaces in sessionStorage)
+                const reportId = isModification && latestReportId ? latestReportId : "rpt_" + Date.now();
                 latestReportId = reportId;
+
+                sessionStorage.setItem(reportId, JSON.stringify(data));
+                // Preserve the original report question — don't overwrite with the modification command
+                if (!isModification) {
+                    sessionStorage.setItem(reportId + "_question", question);
+                }
+                sessionStorage.setItem(reportId + "_provider", selectedProvider);
+                sessionStorage.setItem(reportId + "_theme", document.documentElement.getAttribute("data-theme") || "light");
 
                 // Only update UI if still on the same conversation
                 if (currentConvId === capturedConvId) {
@@ -647,8 +655,11 @@
 
             const reportData = await res.json();
 
-            // Server already cached the report — use the report_id from response
-            const serverReportId = reportData.report_id || reportId;
+            // Store report data in sessionStorage
+            sessionStorage.setItem(reportId, JSON.stringify(reportData));
+            sessionStorage.setItem(reportId + "_question", question);
+            sessionStorage.setItem(reportId + "_provider", selectedProvider);
+            sessionStorage.setItem(reportId + "_theme", document.documentElement.getAttribute("data-theme") || "light");
 
             // Update button to "Open Report"
             btn.disabled = false;
@@ -661,11 +672,11 @@
 
             // Re-wire to only open the report (not regenerate)
             btn.onclick = () => {
-                window.open(`/report-view?id=${serverReportId}`, "_blank");
+                window.open(`/report-view?id=${reportId}`, "_blank");
             };
 
             // Auto-open the report
-            window.open(`/report-view?id=${serverReportId}`, "_blank");
+            window.open(`/report-view?id=${reportId}`, "_blank");
 
         } catch (err) {
             btn.disabled = false;

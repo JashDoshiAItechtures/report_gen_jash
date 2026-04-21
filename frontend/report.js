@@ -4,7 +4,7 @@
    Features: streaming reveal, interactive charts, compact layout.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-(async function () {
+(function () {
     "use strict";
 
     // ── Extract report ID from URL ────────────────────────────────────────
@@ -17,20 +17,17 @@
         return;
     }
 
-    // ── Fetch report data from server-side cache ──────────────────────────
-    let reportData, question, theme;
-    try {
-        const res = await fetch(`/report/cache/${encodeURIComponent(reportId)}`);
-        if (!res.ok) throw new Error("not found");
-        const cached = await res.json();
-        reportData = cached.data;
-        question = cached.question || "Report";
-        theme = cached.theme || "light";
-    } catch (e) {
+    // ── Retrieve data from sessionStorage ─────────────────────────────────
+    const raw = sessionStorage.getItem(reportId);
+    if (!raw) {
         document.getElementById("reportContent").innerHTML =
             '<div class="report-loading"><div class="report-loading-text">Report data not found. Please generate the report again from the chat.</div></div>';
         return;
     }
+
+    const reportData = JSON.parse(raw);
+    const question = sessionStorage.getItem(reportId + "_question") || "Report";
+    const theme = sessionStorage.getItem(reportId + "_theme") || "light";
 
     // Apply the theme from the parent page
     document.documentElement.setAttribute("data-theme", theme);
