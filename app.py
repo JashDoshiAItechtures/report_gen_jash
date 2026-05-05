@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -90,6 +90,7 @@ class ChatResponse(BaseModel):
     row_count: int
     answer: str
     insights: str
+    report_eligible: bool = False  # Hint: frontend should offer report generation
 
 
 class ReportRequest(BaseModel):
@@ -186,6 +187,9 @@ def chat_endpoint(req: QuestionRequest):
     intent = classify_intent(req.question)
     logger.info("CHAT intent classified as: %s", intent)
 
+    # Determine if this question is report-eligible (intent OR significant data)
+    report_eligible_by_intent = intent == "report"
+
     conversation_id = req.conversation_id or "default"
 
     history = get_recent_history(conversation_id, limit=5)
@@ -229,13 +233,102 @@ def chat_endpoint(req: QuestionRequest):
         query_result=(result["data"][:200] if result.get("data") else None),
     )
 
+    # Report-eligible if intent says so, or if query returned 3+ rows of data
+    data_rows = len(result.get("data") or [])
+    report_eligible = report_eligible_by_intent or data_rows >= 3
+
     return ChatResponse(
         mode="chat",
         sql=result["sql"],
         data=result["data"],
-        row_count=len(result.get("data") or []),
+        row_count=data_rows,
         answer=result["answer"],
         insights=result["insights"],
+        report_eligible=report_eligible,
+    )
+
+
+@app.post("/chat/stream")
+def chat_stream_endpoint(req: QuestionRequest):
+    """Stream chat progress via Server-Sent Events (SSE).
+
+    Sends real-time progress updates as each pipeline stage completes,
+    then sends the final result as the last event.
+    """
+    import json as _json
+    from ai.pipeline import SQLAnalystPipeline
+    from ai.report_generator import classify_intent
+    from db.memory import get_recent_history, add_turn
+
+    def event_generator():
+        logger.info(
+            "STREAM request | provider=%s | conversation_id=%s | question=%s",
+            req.provider,
+            req.conversation_id or "default",
+            req.question,
+        )
+
+        intent = classify_intent(req.question)
+        report_eligible_by_intent = intent == "report"
+        conversation_id = req.conversation_id or "default"
+        history = get_recent_history(conversation_id, limit=5)
+
+        if history:
+            history_lines = ["You are in a multi-turn conversation. Here are the recent exchanges:"]
+            for turn in history:
+                history_lines.append(f"User: {turn['question']}")
+                history_lines.append(f"Assistant: {turn['answer']}")
+            history_lines.append(f"Now the user asks: {req.question}")
+            question_with_context = "\n".join(history_lines)
+        else:
+            question_with_context = req.question
+
+        pipeline = SQLAnalystPipeline(provider=req.provider)
+
+        try:
+            for event in pipeline.run_staged(question_with_context):
+                if event["stage"] == "complete":
+                    result = event["data"]
+                    # Persist this turn
+                    add_turn(
+                        conversation_id,
+                        req.question,
+                        result["answer"],
+                        result["sql"],
+                        query_result=(result["data"][:200] if result.get("data") else None),
+                    )
+                    data_rows = len(result.get("data") or [])
+                    report_eligible = report_eligible_by_intent or data_rows >= 3
+                    result["report_eligible"] = report_eligible
+                    result["row_count"] = data_rows
+                    result["mode"] = "chat"
+                    yield f"data: {_json.dumps(event, default=str)}\n\n"
+                else:
+                    yield f"data: {_json.dumps(event)}\n\n"
+        except Exception as exc:
+            logger.error("STREAM error: %s", exc)
+            error_event = {
+                "stage": "complete",
+                "data": {
+                    "sql": "",
+                    "data": [],
+                    "answer": f"An error occurred: {str(exc)}",
+                    "insights": "",
+                    "report_eligible": False,
+                    "row_count": 0,
+                    "mode": "chat",
+                },
+            }
+            yield f"data: {_json.dumps(error_event)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

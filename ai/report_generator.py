@@ -478,12 +478,22 @@ def _fix_report_sql(sql: str) -> str:
     # Fix: inject JOIN to customer_master and replace with cm.customer_name.
     # ══════════════════════════════════════════════════════════════════════
 
+    _SQL_KEYWORDS = {'WHERE', 'GROUP', 'ORDER', 'LIMIT', 'JOIN', 'ON', 'LEFT',
+                     'RIGHT', 'INNER', 'HAVING', 'UNION', 'AS', 'SET', 'INTO',
+                     'VALUES', 'SELECT', 'FROM', 'AND', 'OR', 'NOT', 'IN',
+                     'CROSS', 'FULL', 'OUTER', 'NATURAL', 'USING', 'BETWEEN'}
+
     _so_alias_m = re.search(r'\bsales_order\b(?!_)\s+(\w+)', sql_oneline, re.IGNORECASE)
-    _so_alias_p5 = _so_alias_m.group(1) if _so_alias_m else 'so'
+    _so_alias_p5 = _so_alias_m.group(1) if _so_alias_m else None
+    # Guard: if the captured "alias" is actually a SQL keyword, there's no real alias
+    if _so_alias_p5 and _so_alias_p5.upper() in _SQL_KEYWORDS:
+        _so_alias_p5 = None
+    # Use the table name directly when no alias is present
+    _so_ref_p5 = _so_alias_p5 if _so_alias_p5 else 'sales_order'
 
     # Check: does the SELECT clause contain <so_alias>.customer_id as a label?
     _select_label_cid = re.search(
-        rf'\bSELECT\s+{re.escape(_so_alias_p5)}\.customer_id\b',
+        rf'\bSELECT\s+{re.escape(_so_ref_p5)}\.customer_id\b',
         sql_oneline, re.IGNORECASE
     )
     # Also check for bare customer_id (no alias prefix)
@@ -506,11 +516,11 @@ def _fix_report_sql(sql: str) -> str:
                 pos = _inject_point.start()
                 sql_oneline = (
                     sql_oneline[:pos]
-                    + f'JOIN customer_master {_cm_alias} ON {_so_alias_p5}.customer_id = {_cm_alias}.customer_id '
+                    + f'JOIN customer_master {_cm_alias} ON {_so_ref_p5}.customer_id = {_cm_alias}.customer_id '
                     + sql_oneline[pos:]
                 )
             else:
-                sql_oneline += f' JOIN customer_master {_cm_alias} ON {_so_alias_p5}.customer_id = {_cm_alias}.customer_id'
+                sql_oneline += f' JOIN customer_master {_cm_alias} ON {_so_ref_p5}.customer_id = {_cm_alias}.customer_id'
         else:
             _cm_alias_m = re.search(r'\bcustomer_master\s+(\w+)', sql_oneline, re.IGNORECASE)
             if _cm_alias_m:
@@ -518,13 +528,13 @@ def _fix_report_sql(sql: str) -> str:
 
         # Replace customer_id with customer_name in SELECT
         sql_oneline = re.sub(
-            rf'\bSELECT\s+(?:{re.escape(_so_alias_p5)}\.)?customer_id\b',
+            rf'\bSELECT\s+(?:{re.escape(_so_ref_p5)}\.)?customer_id\b',
             f'SELECT {_cm_alias}.customer_name',
             sql_oneline, count=1, flags=re.IGNORECASE
         )
         # Replace in GROUP BY
         sql_oneline = re.sub(
-            rf'\bGROUP\s+BY\s+(?:{re.escape(_so_alias_p5)}\.)?customer_id\b',
+            rf'\bGROUP\s+BY\s+(?:{re.escape(_so_ref_p5)}\.)?customer_id\b',
             f'GROUP BY {_cm_alias}.customer_name',
             sql_oneline, flags=re.IGNORECASE
         )
@@ -534,10 +544,13 @@ def _fix_report_sql(sql: str) -> str:
     # ══════════════════════════════════════════════════════════════════════
 
     _po_alias_m = re.search(r'\bpurchase_order\b(?!_)\s+(\w+)', sql_oneline, re.IGNORECASE)
-    _po_alias_p6 = _po_alias_m.group(1) if _po_alias_m else 'po'
+    _po_alias_p6 = _po_alias_m.group(1) if _po_alias_m else None
+    if _po_alias_p6 and _po_alias_p6.upper() in _SQL_KEYWORDS:
+        _po_alias_p6 = None
+    _po_ref_p6 = _po_alias_p6 if _po_alias_p6 else 'purchase_order'
 
     _select_label_vid = re.search(
-        rf'\bSELECT\s+(?:{re.escape(_po_alias_p6)}\.)?vendor_id\b',
+        rf'\bSELECT\s+(?:{re.escape(_po_ref_p6)}\.)?vendor_id\b',
         sql_oneline, re.IGNORECASE
     )
     if _select_label_vid:
@@ -552,26 +565,107 @@ def _fix_report_sql(sql: str) -> str:
                 pos = _inject_point.start()
                 sql_oneline = (
                     sql_oneline[:pos]
-                    + f'JOIN vendor_master {_vm_alias} ON {_po_alias_p6}.vendor_id = {_vm_alias}.vendor_id '
+                    + f'JOIN vendor_master {_vm_alias} ON {_po_ref_p6}.vendor_id = {_vm_alias}.vendor_id '
                     + sql_oneline[pos:]
                 )
             else:
-                sql_oneline += f' JOIN vendor_master {_vm_alias} ON {_po_alias_p6}.vendor_id = {_vm_alias}.vendor_id'
+                sql_oneline += f' JOIN vendor_master {_vm_alias} ON {_po_ref_p6}.vendor_id = {_vm_alias}.vendor_id'
         else:
             _vm_alias_m = re.search(r'\bvendor_master\s+(\w+)', sql_oneline, re.IGNORECASE)
             if _vm_alias_m:
                 _vm_alias = _vm_alias_m.group(1)
 
         sql_oneline = re.sub(
-            rf'\bSELECT\s+(?:{re.escape(_po_alias_p6)}\.)?vendor_id\b',
+            rf'\bSELECT\s+(?:{re.escape(_po_ref_p6)}\.)?vendor_id\b',
             f'SELECT {_vm_alias}.vendor_name',
             sql_oneline, count=1, flags=re.IGNORECASE
         )
         sql_oneline = re.sub(
-            rf'\bGROUP\s+BY\s+(?:{re.escape(_po_alias_p6)}\.)?vendor_id\b',
+            rf'\bGROUP\s+BY\s+(?:{re.escape(_po_ref_p6)}\.)?vendor_id\b',
             f'GROUP BY {_vm_alias}.vendor_name',
             sql_oneline, flags=re.IGNORECASE
         )
+
+    # ══════════════════════════════════════════════════════════════════════
+    # PASS 7: Fix gold/diamond-specific columns referenced on wrong alias.
+    #
+    # gold_kt, gold_purity, gold_weight_grams  → sales_order_line_gold  (NOT pricing)
+    # diamond_type, diamond_carat, diamond_quality, diamond_color → sales_order_line_diamond
+    #
+    # The LLM writes lp.gold_kt or solp.gold_kt — both fail at DB level.
+    # Postgres HINT: "Perhaps you meant to reference the column 'g.gold_kt'."
+    # ══════════════════════════════════════════════════════════════════════
+
+    _GOLD_ONLY_COLS7 = ('gold_kt', 'gold_purity', 'gold_weight_grams')
+    _DIAMOND_ONLY_COLS7 = ('diamond_type', 'diamond_carat', 'diamond_quality', 'diamond_color')
+
+    # Detect current gold / diamond / sol table aliases
+    _solg_m7 = re.search(r'\bsales_order_line_gold\s+(\w+)', sql_oneline, re.IGNORECASE)
+    _solg_alias7 = _solg_m7.group(1) if _solg_m7 else None
+    _sold_m7 = re.search(r'\bsales_order_line_diamond\s+(\w+)', sql_oneline, re.IGNORECASE)
+    _sold_alias7 = _sold_m7.group(1) if _sold_m7 else None
+    _sol_m7 = re.search(r'\bsales_order_line\b(?!_)\s+(\w+)', sql_oneline, re.IGNORECASE)
+    _sol_alias7 = _sol_m7.group(1) if _sol_m7 else 'sol'
+
+    for _gcol in _GOLD_ONLY_COLS7:
+        _bad_gold_refs = re.findall(rf'\b(\w+)\.{_gcol}\b', sql_oneline, re.IGNORECASE)
+        for _bad_a in set(_bad_gold_refs):
+            if _solg_alias7 and _bad_a.lower() == _solg_alias7.lower():
+                continue  # already on the correct gold table alias
+            if _solg_alias7:
+                sql_oneline = re.sub(
+                    rf'\b{re.escape(_bad_a)}\.{_gcol}\b',
+                    f'{_solg_alias7}.{_gcol}',
+                    sql_oneline, flags=re.IGNORECASE
+                )
+                logger.info("SQL auto-correct PASS 7: %s.%s → %s.%s (gold column on wrong alias)",
+                            _bad_a, _gcol, _solg_alias7, _gcol)
+            else:
+                _solg_alias7 = 'solg'
+                _inj7 = re.search(r'\b(WHERE|GROUP\s+BY|ORDER\s+BY|LIMIT)\b', sql_oneline, re.IGNORECASE)
+                _join7 = f'JOIN sales_order_line_gold {_solg_alias7} ON {_sol_alias7}.sol_id = {_solg_alias7}.sol_id '
+                if _inj7:
+                    pos = _inj7.start()
+                    sql_oneline = sql_oneline[:pos] + _join7 + sql_oneline[pos:]
+                else:
+                    sql_oneline += ' ' + _join7.strip()
+                sql_oneline = re.sub(
+                    rf'\b{re.escape(_bad_a)}\.{_gcol}\b',
+                    f'{_solg_alias7}.{_gcol}',
+                    sql_oneline, flags=re.IGNORECASE
+                )
+                logger.info("SQL auto-correct PASS 7: added gold join + fixed %s.%s → %s.%s",
+                            _bad_a, _gcol, _solg_alias7, _gcol)
+
+    for _dcol in _DIAMOND_ONLY_COLS7:
+        _bad_dia_refs = re.findall(rf'\b(\w+)\.{_dcol}\b', sql_oneline, re.IGNORECASE)
+        for _bad_a in set(_bad_dia_refs):
+            if _sold_alias7 and _bad_a.lower() == _sold_alias7.lower():
+                continue
+            if _sold_alias7:
+                sql_oneline = re.sub(
+                    rf'\b{re.escape(_bad_a)}\.{_dcol}\b',
+                    f'{_sold_alias7}.{_dcol}',
+                    sql_oneline, flags=re.IGNORECASE
+                )
+                logger.info("SQL auto-correct PASS 7: %s.%s → %s.%s (diamond column on wrong alias)",
+                            _bad_a, _dcol, _sold_alias7, _dcol)
+            else:
+                _sold_alias7 = 'sold'
+                _inj7 = re.search(r'\b(WHERE|GROUP\s+BY|ORDER\s+BY|LIMIT)\b', sql_oneline, re.IGNORECASE)
+                _join7 = f'JOIN sales_order_line_diamond {_sold_alias7} ON {_sol_alias7}.sol_id = {_sold_alias7}.sol_id '
+                if _inj7:
+                    pos = _inj7.start()
+                    sql_oneline = sql_oneline[:pos] + _join7 + sql_oneline[pos:]
+                else:
+                    sql_oneline += ' ' + _join7.strip()
+                sql_oneline = re.sub(
+                    rf'\b{re.escape(_bad_a)}\.{_dcol}\b',
+                    f'{_sold_alias7}.{_dcol}',
+                    sql_oneline, flags=re.IGNORECASE
+                )
+                logger.info("SQL auto-correct PASS 7: added diamond join + fixed %s.%s → %s.%s",
+                            _bad_a, _dcol, _sold_alias7, _dcol)
 
     sql = sql_oneline
 
@@ -845,11 +939,20 @@ class ReportPipeline:
             )
             try:
                 schema_str = format_schema()
+                # Build a context-aware repair question
+                repair_question = f"Fix this SQL for a {context} query"
+                if "GroupingError" in result["error"] or "ungrouped column" in result["error"]:
+                    repair_question += (
+                        ". The error is a correlated subquery GroupingError. "
+                        "Do NOT use correlated subqueries that reference outer query aliases. "
+                        "Rewrite as a simple flat aggregate: "
+                        "SELECT SUM(solp.line_total) AS value FROM ... JOIN ... WHERE ..."
+                    )
                 repair_result = self.repair(
                     sql_query=sql,
                     error_message=result["error"],
                     schema_info=schema_str,
-                    question=f"Fix this SQL for a {context} query",
+                    question=repair_question,
                 )
                 sql = self._clean_sql(repair_result.corrected_sql)
                 sql = _fix_report_sql(sql)  # re-apply regex fixes after repair
@@ -941,6 +1044,310 @@ class ReportPipeline:
             logger.warning("Pre-analysis failed (non-fatal, continuing without guide): %s", exc)
             return ""
 
+    @staticmethod
+    def _get_analytical_framework(question: str) -> str:
+        """Provide high-level analytical guidance based on the report theme.
+
+        Tells the report LLM WHAT to analyze (conceptual metrics/dimensions)
+        without prescribing HOW (no SQL examples — the schema and pre-analysis
+        handle that). This prevents hallucination while ensuring relevant metrics.
+        """
+        q = question.lower().strip()
+        q = re.sub(r'\[active filters:.*?\]', '', q, flags=re.IGNORECASE)
+        q = re.sub(r'\[context:.*?\]', '', q, flags=re.IGNORECASE).strip()
+
+        # Theme → (keywords, focus area, metric hints, anti-patterns)
+        themes = {
+            "customer": {
+                "kw": ["customer", "buyer", "buying pattern", "purchase pattern",
+                       "customer behavior", "customer analysis", "retention",
+                       "churn", "loyalty", "repeat", "rfm", "customer value",
+                       "top 10 customer", "top 5 customer", "top 20 customer",
+                       "top customer", "best customer", "biggest customer",
+                       "customer domain", "customer segment",
+                       "customer spending", "spending", "spend", "spender",
+                       "top spender", "biggest spender", "customer spend"],
+                "focus": "CUSTOMER behavior, segments, spending patterns, and customer-level metrics",
+                "metrics": [
+                    "Total number of unique customers",
+                    "Total customer revenue / spending (SUM of closed order totals)",
+                    "Average order value (AOV) — total revenue ÷ total orders",
+                    "Average number of orders per customer",
+                    "Average spend per customer (total revenue ÷ unique customers)",
+                    "Customer repeat purchase rate (% of customers with 2+ orders)",
+                    "Customer revenue ranking (horizontalBar — top 10 customer names vs total spend)",
+                    "Customer spending trend over time (line chart — monthly revenue)",
+                    "Customer product category preferences (bar — category vs total spend)",
+                    "New vs returning customer split (doughnut — NEW=1 order, RETURNING=2+ orders)",
+                    "Customer concentration — top 10 vs rest (pie — top 10 share vs others)",
+                    "Customer order frequency distribution (bar — orders-per-customer buckets)",
+                ],
+                "sql_notes": (
+                    "CRITICAL SQL NOTES for this report:\n"
+                    "Base table: sales_order (alias: so), JOIN sales_order_line (alias: sol) ON so.so_id = sol.so_id\n"
+                    "Always filter: WHERE so.status = 'closed'\n\n"
+                    "• Total Unique Customers: SELECT COUNT(DISTINCT so.customer_id) AS value FROM sales_order so WHERE so.status = 'closed'\n"
+                    "• Total Customer Revenue: SELECT SUM(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed'\n"
+                    "• Average Order Value (AOV): SELECT ROUND(AVG(so.total_amount), 2) AS value FROM sales_order so WHERE so.status = 'closed'\n"
+                    "• Average Orders per Customer: SELECT ROUND(COUNT(*)::numeric / NULLIF(COUNT(DISTINCT so.customer_id), 0), 2) AS value FROM sales_order so WHERE so.status = 'closed'\n"
+                    "• Average Spend per Customer: SELECT ROUND(SUM(so.total_amount) / NULLIF(COUNT(DISTINCT so.customer_id), 0), 2) AS value FROM sales_order so WHERE so.status = 'closed'\n"
+                    "• Customer Repeat Purchase Rate (%): "
+                    "SELECT ROUND(100.0 * COUNT(DISTINCT CASE WHEN order_count > 1 THEN customer_id END) "
+                    "/ NULLIF(COUNT(DISTINCT customer_id), 0), 2) AS value "
+                    "FROM (SELECT customer_id, COUNT(*) AS order_count FROM sales_order WHERE status = 'closed' GROUP BY customer_id) t\n"
+                    "• New vs Returning split (for CHART only — DO NOT use as KPI): "
+                    "SELECT CASE WHEN order_count = 1 THEN 'New' ELSE 'Returning' END AS customer_type, "
+                    "COUNT(*) AS customer_count "
+                    "FROM (SELECT customer_id, COUNT(*) AS order_count FROM sales_order WHERE status = 'closed' GROUP BY customer_id) t "
+                    "GROUP BY customer_type ORDER BY customer_type\n"
+                    "• Top customers by spend (for CHART): "
+                    "SELECT cm.customer_name, SUM(so.total_amount) AS total_spend "
+                    "FROM sales_order so JOIN customer_master cm ON so.customer_id = cm.customer_id "
+                    "WHERE so.status = 'closed' GROUP BY cm.customer_name ORDER BY total_spend DESC LIMIT 10\n"
+                    "• NEVER use customer_id alone — always JOIN customer_master for the name column in charts."
+                ),
+                "avoid": "generic Total Revenue, generic Top Products, generic Category Distribution, generic Revenue by Region — EVERY KPI label and chart title MUST include the word 'Customer'. Charts MUST show customer-level data on the X-axis (customer names, customer segments, etc.), NOT product names or regions",
+            },
+            "sales": {
+                "kw": ["sales report", "revenue report", "sales analysis", "revenue analysis",
+                       "sales performance", "revenue performance", "total sales", "total revenue",
+                       "sales overview", "revenue overview", "sales dashboard", "revenue dashboard",
+                       "sales summary", "revenue summary", "monthly sales", "monthly revenue",
+                       "yearly sales", "yearly revenue", "quarterly sales"],
+                "focus": "SALES and REVENUE performance, trends, and key business metrics",
+                "metrics": [
+                    "Total revenue (sum of all completed orders)",
+                    "Total number of orders placed",
+                    "Average order value (AOV)",
+                    "Total units sold",
+                    "Revenue trend over time (monthly line chart)",
+                    "Revenue by product category (bar/pie chart)",
+                    "Top products by revenue (horizontal bar chart)",
+                    "Top customers by revenue (horizontal bar chart)",
+                    "Order volume trend (line chart — orders per month)",
+                    "Revenue vs order count correlation (dual-axis or stacked bar)",
+                    "Sales status distribution (pie/doughnut — completed vs cancelled etc.)",
+                    "Revenue by sales channel or region (bar chart)",
+                ],
+                "avoid": "inventory, procurement, or vendor metrics that are unrelated to sales — every KPI and chart must be SALES/REVENUE-centric",
+            },
+            "product": {
+                "kw": ["product analysis", "product performance", "product report",
+                       "best selling", "product mix", "sku analysis", "variant",
+                       "top 10 product", "top 5 product", "top product"],
+                "focus": "PRODUCT-level performance and comparison",
+                "metrics": [
+                    "Total products sold", "Best/worst selling products",
+                    "Average revenue per product", "Product category breakdown",
+                    "Price point distribution", "Product sales trend",
+                    "Top products by volume vs revenue", "Product margin analysis",
+                ],
+                "avoid": "generic order/customer metrics — every KPI and chart must be PRODUCT-centric",
+            },
+            "inventory": {
+                "kw": ["inventory", "stock", "overstock", "understock",
+                       "stock level", "warehouse", "finished goods"],
+                "focus": "INVENTORY levels, stock health, and turnover",
+                "metrics": [
+                    "Total SKUs in stock", "Overstocked items count",
+                    "Low/out-of-stock items", "Stock value by category",
+                    "Stock health distribution", "Top overstocked SKUs",
+                    "Stock turnover indicators", "Category-wise stock levels",
+                ],
+                "avoid": "revenue or customer metrics — every KPI and chart must be INVENTORY-centric",
+            },
+            "vendor": {
+                "kw": ["vendor", "purchase order", "supplier", "procurement",
+                       "vendor analysis", "po analysis",
+                       "top 10 vendor", "top vendor", "best vendor"],
+                "focus": "VENDOR performance and procurement analysis",
+                "metrics": [
+                    "Total active vendors", "Total PO value", "Average PO value",
+                    "Top vendors by value", "PO volume trend",
+                    "Vendor concentration", "PO status distribution",
+                ],
+                "avoid": "sales order or customer metrics — every KPI and chart must be VENDOR/PROCUREMENT-centric",
+            },
+            "material": {
+                "kw": ["gold", "diamond", "karat", "carat", "material",
+                       "making charges", "material cost", "component cost"],
+                "focus": "MATERIAL and component cost breakdown",
+                "metrics": [
+                    "Total gold cost (SUM of gold_amount_per_unit × quantity)",
+                    "Total diamond cost (SUM of diamond_amount_per_unit × quantity)",
+                    "Total making charges (SUM of making_charges_per_unit × quantity)",
+                    "Gold cost by karat type (gold_kt from sales_order_line_gold)",
+                    "Material cost trend over time (monthly line chart)",
+                    "Top products by gold cost (horizontal bar)",
+                    "Cost component ratio — gold vs diamond vs making charges (pie/doughnut)",
+                    "Gold weight distribution by karat (bar chart)",
+                ],
+                "sql_notes": (
+                    "CRITICAL SQL NOTES for this report:\n"
+                    "• gold_amount_per_unit, diamond_amount_per_unit, making_charges_per_unit\n"
+                    "  are columns on sales_order_line_pricing (alias: lp) — use them directly.\n"
+                    "• Total Gold Cost KPI: SELECT SUM(lp.gold_amount_per_unit * sol.quantity) AS value\n"
+                    "  FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id\n"
+                    "  JOIN sales_order_line_pricing lp ON sol.sol_id = lp.sol_id WHERE so.status = 'closed'\n"
+                    "• Total Diamond Cost KPI: same structure but SUM(lp.diamond_amount_per_unit * sol.quantity)\n"
+                    "• Total Making Charges KPI: same structure but SUM(lp.making_charges_per_unit * sol.quantity)\n"
+                    "• NEVER use SUM(lp.line_total) for a specific component — line_total = ALL costs combined.\n"
+                    "• gold_kt (karat type) lives on sales_order_line_gold (alias: solg) — join it for karat charts.\n"
+                    "• diamond_type lives on sales_order_line_diamond (alias: sold) — join for diamond type charts."
+                ),
+                "avoid": "SUM(line_total) for any single component cost; generic revenue metrics unrelated to materials",
+            },
+            "order": {
+                "kw": ["order analysis", "order pattern", "order report",
+                       "order trend", "order frequency", "order status"],
+                "focus": "ORDER-level patterns and fulfillment",
+                "metrics": [
+                    "Total orders", "Average order value", "Order frequency trend",
+                    "Cancellation rate", "Average items per order",
+                    "Order status distribution", "Order value distribution",
+                    "Peak ordering periods",
+                ],
+                "avoid": "product-level or customer-level detail — focus on ORDER metrics",
+            },
+            "aov": {
+                "kw": ["aov", "average order value", "order value", "basket size",
+                       "basket value", "avg order", "average order", "per order"],
+                "focus": "AVERAGE ORDER VALUE (AOV) analysis, trends, and segmentation",
+                "metrics": [
+                    "Overall AOV (total revenue ÷ total orders)",
+                    "Median Order Value (use PERCENTILE_CONT(0.5) WITHIN GROUP)",
+                    "Highest Single Order Value (MAX of total_amount)",
+                    "Orders Above Average (count of orders > overall AOV)",
+                    "AOV Year-over-Year Change % (calculate actual percentage)",
+                    "Top Product by AOV Contribution (product NAME, not count)",
+                    "AOV by product category (bar chart — category vs avg order value)",
+                    "AOV by customer tier (horizontalBar — top/mid/low spending groups)",
+                    "AOV trend over time (line — monthly AOV, ONLY if 6+ months)",
+                    "Order value distribution (doughnut — order size buckets: <1L, 1-5L, 5-10L, >10L)",
+                    "Top 10 products by AOV contribution (horizontalBar)",
+                    "AOV comparison by order status (bar — closed vs open vs processing)",
+                ],
+                "sql_notes": (
+                    "CRITICAL SQL NOTES for AOV reports:\n"
+                    "• AOV = ROUND(SUM(so.total_amount) / NULLIF(COUNT(*), 0), 2) AS value\n"
+                    "  FROM sales_order so WHERE so.status = 'closed'\n"
+                    "• AOV by category: SELECT pm.category, ROUND(AVG(so.total_amount), 2) AS avg_order_value\n"
+                    "  FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id\n"
+                    "  JOIN product_master pm ON sol.product_id = pm.product_id\n"
+                    "  WHERE so.status = 'closed' GROUP BY pm.category ORDER BY avg_order_value DESC\n"
+                    "• Order value buckets: SELECT CASE\n"
+                    "    WHEN so.total_amount < 100000 THEN 'Below ₹1L'\n"
+                    "    WHEN so.total_amount < 500000 THEN '₹1L-5L'\n"
+                    "    WHEN so.total_amount < 1000000 THEN '₹5L-10L'\n"
+                    "    ELSE 'Above ₹10L' END AS order_bucket, COUNT(*) AS order_count\n"
+                    "  FROM sales_order so WHERE so.status = 'closed' GROUP BY order_bucket ORDER BY order_count DESC\n"
+                    "• YoY AOV change: Use subqueries for current vs previous year, calculate % difference\n"
+                    "• For February-specific queries: add WHERE EXTRACT(MONTH FROM so.order_date) = 2\n"
+                    "• NEVER return raw counts as KPI values for 'Top Product' — return the NAME"
+                ),
+                "avoid": "generic revenue/order count metrics that ignore AOV — every KPI and chart must be about ORDER VALUE, not just counts or totals. Do NOT make all charts 'by year' — show different dimensions",
+            },
+            "comparison": {
+                "kw": ["compare", "comparison", "versus", "vs", "across",
+                       "between", "difference", "contrast", "benchmark"],
+                "focus": "COMPARATIVE analysis across multiple dimensions, periods, or segments",
+                "metrics": [
+                    "Metric value for period/segment A vs B",
+                    "Percentage difference between compared items",
+                    "Absolute change (delta) between segments",
+                    "Best performing segment/period (return NAME, not count)",
+                    "Worst performing segment/period (return NAME, not count)",
+                    "Growth rate % between compared periods",
+                    "Side-by-side comparison (bar chart — grouped by dimension)",
+                    "Trend comparison (line chart — multiple series, only if 6+ points)",
+                    "Share breakdown (pie/doughnut — proportion of each segment)",
+                    "Ranking of compared items (horizontalBar)",
+                    "Category-level comparison (stackedBar — multi-series)",
+                    "Distribution across segments (doughnut)",
+                ],
+                "sql_notes": (
+                    "CRITICAL SQL NOTES for comparison reports:\n"
+                    "• Use GROUP BY for the compared dimension (year, month, category, etc.)\n"
+                    "• For year-over-year: EXTRACT(YEAR FROM so.order_date) AS year\n"
+                    "• For month filtering: EXTRACT(MONTH FROM so.order_date) = N\n"
+                    "• For growth %: ROUND(100.0 * (new_val - old_val) / NULLIF(old_val, 0), 2)\n"
+                    "• For best/worst KPIs: use ORDER BY + LIMIT 1 and return the NAME/label\n"
+                    "• IMPORTANT: Do NOT make all 6 charts show the same dimension (e.g. all 'by year').\n"
+                    "  Instead, compare across DIFFERENT angles: by year, by category, by customer,\n"
+                    "  by product, by order size, etc.\n"
+                    "• Use bar charts for ≤5 comparison items, NOT line charts"
+                ),
+                "avoid": "making all charts identical (all 'by year') — each chart must compare a DIFFERENT dimension. Do NOT use line/area for ≤5 data points.",
+            },
+        }
+
+        # Score all themes and pick the top 2 matching ones
+        scored = []
+        for tid, t in themes.items():
+            score = sum(1 for kw in t["kw"] if kw in q)
+            if score > 0:
+                scored.append((score, tid))
+        scored.sort(reverse=True)
+
+        if not scored:
+            return ""
+
+        # Combine top 2 frameworks (e.g., "compare AOV" → aov + comparison)
+        matched_ids = [s[1] for s in scored[:2]]
+
+        result_parts = []
+        for mid in matched_ids:
+            t = themes[mid]
+            metrics_list = "\n".join(f"  • {m}" for m in t["metrics"])
+            sql_notes_block = ""
+            if t.get("sql_notes"):
+                sql_notes_block = f"\n📌 SQL FORMULAS — FOLLOW EXACTLY:\n{t['sql_notes']}\n"
+            part = (
+                f"\n══════════════════════════════════════════════════\n"
+                f"🚨 MANDATORY REPORT FOCUS: {t['focus']}\n"
+                f"══════════════════════════════════════════════════\n"
+                f"YOU MUST generate KPIs and charts from this list:\n"
+                f"{metrics_list}\n"
+                f"{sql_notes_block}\n"
+                f"🚫 STRICTLY FORBIDDEN: {t['avoid']}\n"
+                f"🚨 Every KPI label and chart title MUST relate to: {t['focus']}\n"
+                f"🚨 If a KPI or chart does NOT directly measure {mid.upper()}-level data, DELETE it and replace with one from the list above.\n"
+                f"══════════════════════════════════════════════════"
+            )
+            result_parts.append(part)
+
+        logger.info("Analytical framework(s): %s", ", ".join(f"{mid}(score={s})" for s, mid in scored[:2]))
+
+        # ── Universal KPI quality enforcement (appended to ALL frameworks) ──
+        universal_kpi_rules = (
+            "\n══════════════════════════════════════════════════"
+            "\n⛔ MANDATORY KPI QUALITY RULES (APPLY TO ALL REPORTS)"
+            "\n══════════════════════════════════════════════════"
+            "\nThe following KPI labels are PERMANENTLY BANNED:"
+            "\n  ✗ 'Revenue Growth' — growth requires a baseline comparison; use 'Total Revenue' instead"
+            "\n  ✗ 'Sales Growth' — same reason; use 'Total Sales Value' instead"
+            "\n  ✗ 'Top-Selling Product Category' — this is a NAME, not a scalar; use 'Product Categories Count' instead"
+            "\n  ✗ 'Top-Selling Product' — this is a list/ranking metric, not a KPI"
+            "\n  ✗ Any KPI with 'Growth' in the label UNLESS the SQL calculates an actual % change"
+            "\n  ✗ Any KPI with 'Trend' in the label — trends are charts, not single values"
+            "\n  ✗ Any KPI with 'Distribution' or 'Breakdown' — these are chart metrics"
+            "\n"
+            "\nEACH of the 6 KPIs MUST:"
+            "\n  ✓ Return a UNIQUE numeric value (no two KPIs may share the same number)"
+            "\n  ✓ Use a DIFFERENT SQL query (different aggregate function or different WHERE clause)"
+            "\n  ✓ Be a meaningful scalar: COUNT, SUM, AVG, MAX, MIN, or a calculated RATIO"
+            "\n  ✓ Have a label that clearly describes what the NUMBER represents"
+            "\n"
+            "\nGOOD KPI examples: Total Revenue, Total Orders, Average Order Value, "
+            "Unique Customers, Total Quantity Sold, Order Fulfillment Rate (%)"
+            "\nBAD KPI examples: Revenue Growth, Sales Growth, Top-Selling Product, "
+            "Revenue Trend, Category Distribution"
+            "\n══════════════════════════════════════════════════"
+        )
+        result_parts.append(universal_kpi_rules)
+
+        return "\n".join(result_parts)
+
     def _regenerate_sql(self, sql_description: str) -> str | None:
         """Regenerate a SQL query using the chat pipeline's full chain.
 
@@ -992,10 +1399,19 @@ class ReportPipeline:
         """Best-effort repair of common LLM JSON generation errors.
 
         Handles:
-        1. Literal newlines / tabs / carriage-returns inside string values
-        2. Trailing commas before } or ]
-        3. Truncated JSON (missing closing braces/brackets)
+        1. Single-quoted keys/values -> double-quoted
+        2. Literal newlines / tabs / carriage-returns inside string values
+        3. Trailing commas before } or ]
+        4. Truncated JSON (missing closing braces/brackets)
         """
+        # ── Pass 0: if the text looks like Python dict (single quotes), convert ──
+        # Only attempt if there is no " in the text but there are '
+        if "'" in text and '"' not in text:
+            import re as _re0
+            # Replace 'key': pattern
+            text = _re0.sub(r"(?<=[{,\[]\s*)'", '"', text)
+            text = _re0.sub(r"'(?=\s*[:\}\],])", '"', text)
+
         # ── Pass 1: escape unescaped control chars inside string literals ──
         result: list[str] = []
         in_string = False
@@ -1107,28 +1523,578 @@ class ReportPipeline:
 
         return json.loads(repaired)  # let the caller handle any final exception
 
+    @staticmethod
+    def _fix_kpi_sql(sql: str) -> str:
+        """Detect and fix KPI SQL that returns multiple rows instead of a single aggregate.
+
+        Common LLM mistakes:
+        - SELECT name, SUM(x) ... GROUP BY name ORDER BY ... LIMIT 10  (ranking, not KPI)
+        - SELECT col FROM ... LIMIT 5  (list, not aggregate)
+
+        Fix strategy: wrap multi-row queries into a COUNT or SUM aggregate.
+        """
+        if not sql:
+            return sql
+
+        sql_upper = ' '.join(sql.upper().split())
+
+        # Detect multi-row patterns: GROUP BY with multiple result rows
+        has_group_by = 'GROUP BY' in sql_upper
+
+        # Check for LIMIT > 1 (LIMIT 10, LIMIT 5, etc.)
+        limit_match = re.search(r'LIMIT\s+(\d+)', sql_upper)
+        has_multi_limit = limit_match and int(limit_match.group(1)) > 1
+
+        # Check if the SELECT already looks like a single aggregate (no GROUP BY)
+        # e.g., SELECT COUNT(*), SELECT SUM(x) — these are fine
+        select_match = re.search(r'SELECT\s+(.*?)\s+FROM', sql_upper, re.DOTALL)
+        if select_match:
+            select_clause = select_match.group(1).strip()
+            # If it's a pure aggregate (no comma-separated non-agg columns), it's fine
+            agg_funcs = ['COUNT(', 'SUM(', 'AVG(', 'MIN(', 'MAX(', 'ROUND(']
+            is_pure_aggregate = (
+                any(select_clause.startswith(f) for f in agg_funcs)
+                and ',' not in select_clause
+                and not has_group_by
+            )
+            if is_pure_aggregate:
+                return sql  # Already a proper KPI query
+
+        # ── Detect correlated subquery (GroupingError source) ────────────────
+        # Pattern: the SQL itself contains a nested SELECT that references outer
+        # table aliases — PostgreSQL rejects this in a scalar context.
+        # Fix: strip the inner subquery and rewrite as a flat aggregate.
+        correlated_subq = re.search(
+            r'\(\s*SELECT\b.*?\bWHERE\b.*?\b(\w+)\.(\w+)\s*=\s*(\w+)\.(\w+)',
+            sql, re.IGNORECASE | re.DOTALL
+        )
+        if correlated_subq:
+            # Best-effort: remove the problematic subquery clause entirely,
+            # keeping the outer aggregate structure. The repair loop will
+            # regenerate a clean version via LLM if this produces bad SQL.
+            sql = re.sub(
+                r'/\s*\(\s*SELECT\b[^)]+\)\s*/',
+                '',
+                sql, flags=re.IGNORECASE | re.DOTALL
+            )
+            sql_upper = ' '.join(sql.upper().split())
+            has_group_by = 'GROUP BY' in sql_upper
+            logger.info("KPI SQL auto-fix: stripped correlated subquery")
+
+        if has_group_by or has_multi_limit:
+            # This is a ranking/list query, not a KPI
+            # Wrap it: SELECT COUNT(*) AS value FROM (original) sub
+            # But first, try to detect the value column to SUM it instead
+            if has_group_by and select_match:
+                # Find the aggregate column (last column in SELECT)
+                cols = select_match.group(1).strip()
+                # Try to find the aggregate expression
+                agg_match = re.search(
+                    r'(SUM|COUNT|AVG|MIN|MAX)\s*\([^)]+\)',
+                    cols, re.IGNORECASE
+                )
+                if agg_match:
+                    agg_expr = agg_match.group(0)
+                    # Remove the GROUP BY and everything after, replace SELECT
+                    # to get a total aggregate
+                    fixed = re.sub(
+                        r'SELECT\s+.*?\s+FROM',
+                        f'SELECT {agg_expr} AS value FROM',
+                        sql, count=1, flags=re.IGNORECASE | re.DOTALL
+                    )
+                    fixed = re.sub(
+                        r'\s+GROUP\s+BY\s+.*$',
+                        '', fixed, flags=re.IGNORECASE
+                    )
+                    fixed = re.sub(
+                        r'\s+ORDER\s+BY\s+.*$',
+                        '', fixed, flags=re.IGNORECASE
+                    )
+                    fixed = re.sub(
+                        r'\s+LIMIT\s+\d+',
+                        '', fixed, flags=re.IGNORECASE
+                    )
+                    logger.info("KPI SQL auto-fix: converted ranking query to aggregate")
+                    return fixed.strip()
+
+            # Fallback: wrap the entire query in a COUNT
+            clean_sql = sql.rstrip(';').strip()
+            wrapped = f"SELECT COUNT(*) AS value FROM ({clean_sql}) _kpi_sub"
+            logger.info("KPI SQL auto-fix: wrapped multi-row query in COUNT(*)")
+            return wrapped
+
+        return sql
+
+    @staticmethod
+    def _format_indian(num: float) -> str:
+        """Format a numeric value into Indian notation (crores/lakhs)."""
+        abs_num = abs(num)
+        if abs_num >= 1e7:
+            return f"₹{num / 1e7:.2f} crores"
+        if abs_num >= 1e5:
+            return f"₹{num / 1e5:.2f} lakhs"
+        return f"₹{num:,.2f}"
+
+    def _regenerate_summary(self, original_summary: str, kpis: list) -> str:
+        """Prepend actual KPI values to the report summary so the displayed
+        text matches the SQL query results instead of LLM-estimated values."""
+        valid_kpis = [
+            k for k in kpis
+            if isinstance(k.get("value"), (int, float))
+        ]
+        if not valid_kpis:
+            return original_summary
+
+        lines = ["Actual values from the database:"]
+        for k in valid_kpis:
+            label = k.get("label") or k.get("id") or "Metric"
+            val = k["value"]
+            fmt = k.get("format", "")
+            if fmt == "percent":
+                display = f"{val:.1f}%"
+            elif fmt == "currency" or abs(val) >= 1e5:
+                display = self._format_indian(val)
+            elif isinstance(val, float):
+                display = f"{val:,.2f}"
+            else:
+                display = f"{val:,}"
+            lines.append(f"• {label}: {display}")
+
+        actual_block = "\n".join(lines)
+        return actual_block + "\n\n" + original_summary
+
+    # ── Bad KPI label patterns (chart-type metrics, not single values) ──
+    _BAD_KPI_RE = re.compile(
+        r'\btop[\s-]+\d+\b'          # "Top 5 Vendors", "Top-10 Products"
+        r'|\btop[\s-]+selling\b'     # "Top-Selling Products" — list metric
+        r'|\bbest[\s-]+selling\b'    # "Best Selling" — list metric
+        r'|\btrend\b'               # "Revenue Trend" — chart metric
+        r'|\bgrowth\s+(?:trend|over|chart|timeline)\b'  # "Growth Trend/Over Time" — chart metric
+        r'|\b(?:revenue|sales|order|customer|product|vendor|purchase)\s+growth\b'  # standalone "Revenue Growth" etc.
+        r'|\bgrowth\s+rate\b'        # "Growth Rate" — unmeasurable as single scalar
+        r'|\byear[- ]over[- ]year\b' # "Year-over-Year" without actual % calculation
+        r'|\bmonth[- ]over[- ]month\b' # "Month-over-Month" without actual % calculation
+        r'|\b(?:yoy|mom)\s+(?:growth|change|variance)\b'  # abbreviated growth patterns
+        r'|\bdistribution\b'        # "Customer Distribution" — chart metric
+        r'|\bbreakdown\b'           # "Category Breakdown" — chart metric
+        r'|\bconcentration\b'       # "Vendor Concentration" — not a scalar
+        r'|\bcomposition\b'         # "Revenue Composition" — chart metric
+        r'|\branking\b'             # "Product Ranking" — list metric
+        r'|\blist\b'                # "Product List" — not a KPI
+        r'|\boverview\b'            # "Sales Overview" — too vague
+        r'|\bby\s+\w+\b'            # "Revenue By Month" — chart metric
+        r'|\bover\s+time\b'         # "Sales Over Time" — chart metric
+        r'|\bmost\s+\w+\b'          # "Most Popular" — list metric
+        r'|\bbottom\s+\d+\b',       # "Bottom 5" — list metric
+        re.IGNORECASE,
+    )
+
+    # ── Semantic KPI label normalization (for synonym detection) ──
+    _KPI_SYNONYMS = {
+        'total': '', 'overall': '', 'aggregate': '', 'cumulative': '',
+        'net': '', 'gross': '', 'all': '', 'entire': '',
+    }
+
+    @staticmethod
+    def _normalize_kpi_label(label: str) -> str:
+        """Normalize a KPI label to a canonical form for semantic comparison.
+
+        Strips filler words so 'Total Revenue' == 'Overall Revenue' == 'Revenue'.
+        """
+        words = label.lower().strip().split()
+        significant = [w for w in words if w not in ReportPipeline._KPI_SYNONYMS]
+        return ' '.join(significant) if significant else label.lower().strip()
+
+    @staticmethod
+    def _sql_signature(sql: str) -> str:
+        """Extract a signature from a SQL query for similarity comparison.
+
+        Normalizes whitespace, removes aliases, and extracts key FROM/WHERE/GROUP.
+        Two KPIs with the same signature are semantically redundant.
+        """
+        if not sql:
+            return ''
+        s = ' '.join(sql.upper().split())
+        # Extract the core structure: FROM tables + WHERE conditions + aggregation
+        parts = []
+        from_match = re.search(r'FROM\s+(.+?)\s*(?:WHERE|GROUP|ORDER|LIMIT|$)', s)
+        if from_match:
+            parts.append('FROM:' + from_match.group(1).strip()[:80])
+        where_match = re.search(r'WHERE\s+(.+?)\s*(?:GROUP|ORDER|LIMIT|$)', s)
+        if where_match:
+            parts.append('WHERE:' + where_match.group(1).strip()[:80])
+        # Extract the aggregate function
+        agg_match = re.search(r'(SUM|COUNT|AVG|MIN|MAX)\s*\([^)]+\)', s)
+        if agg_match:
+            parts.append('AGG:' + agg_match.group(0))
+        return '|'.join(parts)
+
+    def _clean_kpis(self, kpis: list) -> list:
+        """Clean, validate and deduplicate KPIs.
+
+        1. Remove KPIs with N/A, None or error values (zero-valued are held as fallback)
+        2. Remove KPIs whose labels indicate chart-type metrics (top N, trend, etc.)
+        3. Deduplicate KPIs with identical numeric values
+        4. Guarantee at least MIN_KPIS=6 survive by restoring filtered KPIs in order:
+           value-duplicates → bad-pattern KPIs → zero-valued KPIs → error KPIs (last resort)
+        """
+        MIN_KPIS = 6
+        MAX_KPIS = 6
+        original_count = len(kpis)
+
+        _BAD_VALUES = {None, "", "N/A", "null", "None", "none", "n/a", "NaN", "nan"}
+
+        # Step 1: separate non-zero, zero-valued, broken, and error KPIs
+        non_zero: list = []
+        zero_kpis: list = []
+        error_kpis: list = []  # KPIs with SQL errors — last resort
+        for k in kpis:
+            v = k.get("value")
+            if k.get("error"):
+                error_kpis.append(k)
+                continue
+            if v is None:
+                error_kpis.append(k)
+                continue
+            s = str(v).strip()
+            if s in _BAD_VALUES:
+                error_kpis.append(k)
+                continue
+            try:
+                if float(v) == 0:
+                    zero_kpis.append(k)
+                    continue
+            except (ValueError, TypeError):
+                pass
+            non_zero.append(k)
+
+        # Step 2: reject bad-pattern labels; keep rejects as fallback candidates
+        pattern_ok: list = []
+        pattern_bad: list = []
+        for k in non_zero:
+            if self._BAD_KPI_RE.search(k.get("label", "")):
+                pattern_bad.append(k)
+            else:
+                pattern_ok.append(k)
+
+        if pattern_bad:
+            logger.info("Removed %d bad-pattern KPIs (top-N/trend/distribution/breakdown)",
+                        len(pattern_bad))
+
+        # Step 3: deduplicate identical numeric values; keep rejects as fallback
+        seen: dict = {}
+        deduped: list = []
+        value_dupes: list = []
+        for k in pattern_ok:
+            try:
+                norm = round(float(k.get("value", 0)), 2)
+            except (ValueError, TypeError):
+                norm = k.get("value")
+            if norm not in seen:
+                seen[norm] = k.get("label", "?")
+                deduped.append(k)
+            else:
+                logger.info("Duplicate KPI '%s' (same value as '%s')",
+                            k.get("label", "?"), seen[norm])
+                value_dupes.append(k)
+
+        # Step 3b: semantic deduplication — detect synonym labels or similar SQL
+        label_seen: dict = {}   # normalized_label → index in deduped
+        sql_seen: dict = {}     # sql_signature → index in deduped
+        semantic_dupes: list = []
+        clean_deduped: list = []
+        for k in deduped:
+            norm_label = self._normalize_kpi_label(k.get("label", ""))
+            sql_sig = self._sql_signature(k.get("sql", ""))
+
+            # Check if a KPI with a very similar label already exists
+            is_label_dupe = norm_label in label_seen and len(norm_label) > 3
+            # Check if a KPI with the same SQL signature exists
+            is_sql_dupe = sql_sig in sql_seen and len(sql_sig) > 10
+
+            if is_label_dupe:
+                logger.info("Semantic dedup: '%s' is synonym of '%s' (label match)",
+                            k.get("label", "?"), deduped[label_seen[norm_label]].get("label", "?"))
+                semantic_dupes.append(k)
+            elif is_sql_dupe:
+                logger.info("Semantic dedup: '%s' has same SQL signature as '%s'",
+                            k.get("label", "?"), deduped[sql_seen[sql_sig]].get("label", "?"))
+                semantic_dupes.append(k)
+            else:
+                if norm_label and len(norm_label) > 3:
+                    label_seen[norm_label] = len(clean_deduped)
+                if sql_sig and len(sql_sig) > 10:
+                    sql_seen[sql_sig] = len(clean_deduped)
+                clean_deduped.append(k)
+
+        if semantic_dupes:
+            logger.info("Removed %d semantically duplicate KPIs", len(semantic_dupes))
+            # Add semantic dupes to value_dupes pool for fallback restoration
+            value_dupes.extend(semantic_dupes)
+
+        deduped = clean_deduped
+
+        # Cap at MAX_KPIS to keep the report focused
+        deduped = deduped[:MAX_KPIS]
+
+        # ── Priority 0: Generate FRESH replacement KPIs via chat pipeline ─────
+        # When bad/duplicate KPIs are removed, try to generate genuinely new ones
+        # instead of recycling the same bad pool.
+        if len(deduped) < MIN_KPIS:
+            _replacement_ideas = [
+                ("Total Quantity Sold", "SELECT SUM(sol.quantity) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id WHERE so.status = 'closed'"),
+                ("Unique Products Sold", "SELECT COUNT(DISTINCT sol.product_id) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id WHERE so.status = 'closed'"),
+                ("Unique Active Customers", "SELECT COUNT(DISTINCT so.customer_id) AS value FROM sales_order so WHERE so.status = 'closed'"),
+                ("Average Line Total", "SELECT ROUND(AVG(solp.line_total)::numeric, 2) AS value FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id JOIN sales_order_line_pricing solp ON sol.sol_id = solp.sol_id WHERE so.status = 'closed'"),
+                ("Highest Single Order Value", "SELECT MAX(so.total_amount) AS value FROM sales_order so WHERE so.status = 'closed'"),
+                ("Order Fulfillment Rate (%)", "SELECT ROUND(100.0 * COUNT(CASE WHEN status = 'closed' THEN 1 END) / NULLIF(COUNT(*), 0), 2) AS value FROM sales_order"),
+                ("Total Product Categories", "SELECT COUNT(DISTINCT pm.category) AS value FROM product_master pm"),
+                ("Average Items Per Order", "SELECT ROUND(AVG(item_count)::numeric, 2) AS value FROM (SELECT so.so_id, COUNT(sol.sol_id) AS item_count FROM sales_order so JOIN sales_order_line sol ON so.so_id = sol.so_id WHERE so.status = 'closed' GROUP BY so.so_id) sub"),
+            ]
+
+            # Collect existing label signatures to avoid duplicating
+            _existing_labels = {self._normalize_kpi_label(k.get("label", "")) for k in deduped}
+            _existing_values = set()
+            for k in deduped:
+                try:
+                    _existing_values.add(round(float(k.get("value", 0)), 2))
+                except (ValueError, TypeError):
+                    pass
+
+            _colors = ["blue", "green", "purple", "orange", "red", "teal"]
+            _icons = ["revenue", "orders", "customers", "products", "growth", "average"]
+
+            for idea_label, idea_sql in _replacement_ideas:
+                if len(deduped) >= MIN_KPIS:
+                    break
+                # Skip if a similar label already exists
+                norm = self._normalize_kpi_label(idea_label)
+                if norm in _existing_labels:
+                    continue
+
+                # Execute the replacement SQL
+                try:
+                    idea_sql = _fix_report_sql(idea_sql)
+                    result = execute_sql(idea_sql)
+                    if not result["success"] or not result["data"]:
+                        continue
+                    row = result["data"][0]
+                    val = list(row.values())[0] if row else None
+                    if val is None:
+                        continue
+                    try:
+                        float_val = round(float(val), 2)
+                    except (ValueError, TypeError):
+                        float_val = None
+
+                    # Skip if this value already exists
+                    if float_val is not None and float_val in _existing_values:
+                        continue
+
+                    idx = len(deduped)
+                    new_kpi = {
+                        "id": f"kpi_gen_{idx}",
+                        "label": idea_label,
+                        "sql": idea_sql,
+                        "value": val,
+                        "format": "percent" if "%" in idea_label or "rate" in idea_label.lower() else "number",
+                        "icon": _icons[idx % len(_icons)],
+                        "color": _colors[idx % len(_colors)],
+                        "explanation": {
+                            "what": f"Measures {idea_label.lower()}",
+                            "how": "Calculated from sales data",
+                            "why": "Provides additional business context",
+                            "insight": f"Current value: {val}"
+                        }
+                    }
+                    deduped.append(new_kpi)
+                    _existing_labels.add(norm)
+                    if float_val is not None:
+                        _existing_values.add(float_val)
+                    logger.info("Generated replacement KPI '%s' = %s", idea_label, val)
+                except Exception as exc:
+                    logger.warning("Replacement KPI '%s' failed: %s", idea_label, exc)
+
+        # ── Guarantee MIN_KPIS — restore in priority order ────────────────
+        if len(deduped) < MIN_KPIS:
+            # Priority 1: value-duplicates that DON'T also have bad-pattern labels
+            # (avoids restoring doubly-bad KPIs: duplicate value AND bad label)
+            for k in value_dupes:
+                if len(deduped) >= MIN_KPIS:
+                    break
+                if not self._BAD_KPI_RE.search(k.get("label", "")):
+                    deduped.append(k)
+                    logger.info("Restored value-duplicate KPI '%s' to meet minimum count",
+                                k.get("label", "?"))
+
+        if len(deduped) < MIN_KPIS:
+            # Priority 2: bad-pattern KPIs — ONLY if their value is not already present
+            # (prevents e.g. 'Top-Selling Products: ₹1031Cr' when 'Total Revenue: ₹1031Cr' exists)
+            _existing_vals = set()
+            for k in deduped:
+                try:
+                    _existing_vals.add(round(float(k.get("value", 0)), 2))
+                except (ValueError, TypeError):
+                    pass
+            for k in pattern_bad:
+                if len(deduped) >= MIN_KPIS:
+                    break
+                try:
+                    kv = round(float(k.get("value", 0)), 2)
+                except (ValueError, TypeError):
+                    kv = None
+                if kv not in _existing_vals:
+                    deduped.append(k)
+                    if kv is not None:
+                        _existing_vals.add(kv)
+                    logger.info("Restored bad-pattern KPI '%s' (unique value) to meet minimum count",
+                                k.get("label", "?"))
+
+        if len(deduped) < MIN_KPIS:
+            # Priority 3: last resort — zero-valued KPIs with clean labels
+            for k in zero_kpis:
+                if len(deduped) >= MIN_KPIS:
+                    break
+                if not self._BAD_KPI_RE.search(k.get("label", "")):
+                    deduped.append(k)
+                    logger.info("Restored zero-valued KPI '%s' as last resort",
+                                k.get("label", "?"))
+
+        if len(deduped) < MIN_KPIS:
+            # Priority 4: absolute last resort — any zero-valued KPI (even bad-pattern labels)
+            for k in zero_kpis:
+                if len(deduped) >= MIN_KPIS:
+                    break
+                if k not in deduped:
+                    deduped.append(k)
+                    logger.info("Restored zero-valued KPI '%s' (any label) as absolute last resort",
+                                k.get("label", "?"))
+
+        if len(deduped) < MIN_KPIS:
+            # Priority 5: error KPIs — shown as 'Error' card in UI; better than a missing slot
+            for k in error_kpis:
+                if len(deduped) >= MIN_KPIS:
+                    break
+                deduped.append(k)
+                logger.info("Restored error KPI '%s' to fill missing slot",
+                            k.get("label", "?"))
+
+        # ── Final pass: remove any duplicate-value KPIs that slipped through ──
+        # Prefer the clean-label KPI when two share the same numeric value.
+        final_seen: dict = {}   # norm_value → (list_index, is_bad_label)
+        final_deduped: list = []
+        for k in deduped:
+            try:
+                norm = round(float(k.get("value", 0)), 2)
+            except (ValueError, TypeError):
+                final_deduped.append(k)
+                continue
+            is_bad = bool(self._BAD_KPI_RE.search(k.get("label", "")))
+            if norm not in final_seen:
+                final_seen[norm] = (len(final_deduped), is_bad)
+                final_deduped.append(k)
+            elif is_bad:
+                logger.info(
+                    "Final dedup: dropped bad-label KPI '%s' (duplicate value of existing)",
+                    k.get("label", "?"),
+                )
+            else:
+                existing_idx, existing_is_bad = final_seen[norm]
+                if existing_is_bad:
+                    # Replace the earlier bad-label KPI with this cleaner one
+                    final_deduped[existing_idx] = k
+                    final_seen[norm] = (existing_idx, False)
+                    logger.info(
+                        "Final dedup: replaced bad-label KPI with cleaner '%s'",
+                        k.get("label", "?"),
+                    )
+                else:
+                    logger.info(
+                        "Final dedup: dropped duplicate-value KPI '%s'",
+                        k.get("label", "?"),
+                    )
+        # Floor: if final dedup left too few KPIs, restore clean-label KPIs
+        # (e.g. all 6 KPIs computed identical values due to LLM SQL mistakes —
+        # showing 2-3 "same value" KPIs is better than showing 1)
+        _FINAL_DEDUP_FLOOR = 3
+        if len(final_deduped) < _FINAL_DEDUP_FLOOR:
+            for k in deduped:
+                if len(final_deduped) >= _FINAL_DEDUP_FLOOR:
+                    break
+                if k not in final_deduped:
+                    if not self._BAD_KPI_RE.search(k.get("label", "")):
+                        final_deduped.append(k)
+                        logger.info(
+                            "Final dedup floor: restored clean-label KPI '%s' to reach minimum %d",
+                            k.get("label", "?"), _FINAL_DEDUP_FLOOR,
+                        )
+
+        deduped = final_deduped
+
+        if len(deduped) != original_count:
+            logger.info("KPIs after cleanup: %d of %d valid", len(deduped), original_count)
+        return deduped
+
     def _execute_kpi_sql(self, kpi: dict) -> dict:
-        """Execute a KPI's SQL and populate its value."""
+        """Execute a KPI's SQL and populate its value.
+
+        If the initial SQL returns zero/null/error, attempts regeneration
+        via the chat pipeline's full chain for data accuracy.
+        """
         sql = kpi.get("sql", "")
         if not sql:
             kpi["value"] = "N/A"
             kpi["error"] = "No SQL provided"
             return kpi
 
+        # ── Fix column aliases and table references first (all 7 passes) ──
+        sql = _fix_report_sql(sql)
+        # ── Then convert ranking queries to scalar aggregates ───────────
+        sql = self._fix_kpi_sql(sql)
+
         kpi_label = kpi.get("label", kpi.get("id", "?"))
         sql, result = self._validate_and_execute_sql(
             sql, context=f"KPI:{kpi_label}",
-            sql_description=f"Calculate a single numeric value for: {kpi_label}",
+            sql_description=f"Calculate a single numeric value for: {kpi_label}. The SQL MUST return exactly ONE row with ONE numeric value. Do NOT use GROUP BY or LIMIT > 1.",
         )
         kpi["sql"] = sql  # store corrected SQL
 
         if not result["success"]:
             kpi["value"] = "N/A"
             kpi["error"] = result["error"]
+            # ── Attempt regeneration via chat pipeline ──────────────────
+            kpi = self._try_regenerate_kpi(kpi)
             return kpi
 
         data = result["data"]
         if data and len(data) > 0:
+            # ── If result has multiple rows, auto-aggregate ────────────
+            if len(data) > 1:
+                logger.warning(
+                    "KPI '%s' returned %d rows — expected 1. Auto-aggregating.",
+                    kpi_label, len(data)
+                )
+                # Try to sum all numeric values across rows
+                first_row = data[0]
+                value_cols = [k for k, v in first_row.items()
+                              if isinstance(v, (int, float)) or
+                              (v is not None and str(v).replace('.', '').replace('-', '').isdigit())]
+                if value_cols:
+                    # Use the last numeric column (usually the aggregate)
+                    val_col = value_cols[-1]
+                    total = 0
+                    for row in data:
+                        try:
+                            total += float(row.get(val_col, 0) or 0)
+                        except (ValueError, TypeError):
+                            pass
+                    kpi["value"] = total
+                    return kpi
+                else:
+                    # No numeric column — just count the rows
+                    kpi["value"] = len(data)
+                    return kpi
+
             first_row = data[0]
             if not first_row:
                 kpi["value"] = "N/A"
@@ -1153,10 +2119,81 @@ class ReportPipeline:
         else:
             kpi["value"] = "N/A"
 
+        # ── If the value is zero or N/A, try regeneration ──────────────
+        try:
+            val = kpi.get("value")
+            if val == "N/A" or val is None or (isinstance(val, (int, float)) and val == 0):
+                kpi = self._try_regenerate_kpi(kpi)
+        except Exception:
+            pass
+
+        return kpi
+
+    def _try_regenerate_kpi(self, kpi: dict) -> dict:
+        """Attempt to regenerate a KPI's SQL using the chat pipeline when the
+        original SQL returned zero, null, or errored.
+
+        This bridges the accuracy gap between the report pipeline (single LLM call
+        generating all SQL at once) and the chat pipeline (2-step guided chain).
+        """
+        if self._regen_count >= self._MAX_REGEN_PER_REPORT:
+            return kpi
+
+        kpi_label = kpi.get("label", kpi.get("id", "?"))
+        logger.info("KPI '%s' returned zero/null/error — attempting chat-pipeline regeneration", kpi_label)
+
+        self._regen_count += 1
+        regen_sql = self._regenerate_sql(
+            f"Calculate a single numeric value for the KPI: '{kpi_label}'. "
+            f"The SQL MUST return exactly ONE row with ONE numeric column named 'value'. "
+            f"Do NOT use GROUP BY. Do NOT use LIMIT > 1. Return a scalar aggregate."
+        )
+        if not regen_sql:
+            return kpi
+
+        # Validate and execute the regenerated SQL
+        regen_sql = _fix_report_sql(regen_sql)
+        regen_sql = self._fix_kpi_sql(regen_sql)
+        from ai.validator import validate_sql as _val_sql
+        is_safe, _ = _val_sql(regen_sql)
+        if not is_safe:
+            return kpi
+
+        regen_result = execute_sql(regen_sql)
+        if not regen_result["success"] or not regen_result["data"]:
+            return kpi
+
+        # Extract the value from the regenerated result
+        data = regen_result["data"]
+        if data and len(data) > 0:
+            first_row = data[0]
+            values = list(first_row.values())
+            numeric_val = None
+            for v in reversed(values):
+                if v is not None and isinstance(v, (int, float)):
+                    numeric_val = v
+                    break
+                try:
+                    numeric_val = float(v)
+                    break
+                except (TypeError, ValueError):
+                    continue
+
+            if numeric_val is not None and (numeric_val != 0 or kpi.get("value") == "N/A"):
+                logger.info("KPI '%s' regenerated successfully: %s → %s",
+                            kpi_label, kpi.get("value"), numeric_val)
+                kpi["value"] = numeric_val
+                kpi["sql"] = regen_sql
+                kpi.pop("error", None)
+
         return kpi
 
     def _execute_chart_sql(self, chart: dict) -> dict:
-        """Execute a chart's SQL and populate its data."""
+        """Execute a chart's SQL and populate its data.
+
+        If the SQL fails or returns empty/bad data, attempts regeneration
+        via the chat pipeline for data accuracy.
+        """
         sql = chart.get("sql", "")
         if not sql:
             chart["data"] = []
@@ -1164,6 +2201,7 @@ class ReportPipeline:
             return chart
 
         chart_title = chart.get("title", chart.get("id", "?"))
+        chart_type = chart.get("type", "bar")
         sql, result = self._validate_and_execute_sql(
             sql, context=f"Chart:{chart_title}",
             sql_description=f"Query data for chart: {chart_title}. Return rows with a label column and a value column.",
@@ -1173,9 +2211,96 @@ class ReportPipeline:
         if not result["success"]:
             chart["data"] = []
             chart["error"] = result["error"]
+            # ── Attempt regeneration via chat pipeline ──────────────────
+            chart = self._try_regenerate_chart(chart)
             return chart
 
         chart["data"] = result["data"]
+
+        # ── Validate chart data quality ─────────────────────────────────
+        chart = self._validate_chart_data(chart)
+
+        return chart
+
+    def _validate_chart_data(self, chart: dict) -> dict:
+        """Check chart data for quality issues and attempt regeneration if bad.
+
+        Detects:
+        - Empty data (0 rows)
+        - Single-column data (missing label or value)
+        - All-zero or all-null value columns
+        - Single row (KPI-style result, not chart-worthy)
+        """
+        data = chart.get("data", [])
+        chart_title = chart.get("title", "?")
+
+        if not data or len(data) == 0:
+            logger.info("Chart '%s' — empty data, attempting regeneration", chart_title)
+            return self._try_regenerate_chart(chart)
+
+        # Check column count
+        keys = list(data[0].keys())
+        if len(keys) < 2:
+            logger.info("Chart '%s' — only %d column(s), attempting regeneration", chart_title, len(keys))
+            return self._try_regenerate_chart(chart)
+
+        # Check if all numeric values are zero/null
+        value_keys = keys[1:]
+        _bad_vals = {None, 0, "", "0", 0.0}
+        all_bad = all(
+            all(row.get(k) in _bad_vals for k in value_keys)
+            for row in data
+        )
+        if all_bad:
+            logger.info("Chart '%s' — all values are zero/null, attempting regeneration", chart_title)
+            return self._try_regenerate_chart(chart)
+
+        return chart
+
+    def _try_regenerate_chart(self, chart: dict) -> dict:
+        """Attempt to regenerate a chart's SQL using the chat pipeline when the
+        original SQL returned empty, errored, or bad data.
+        """
+        if self._regen_count >= self._MAX_REGEN_PER_REPORT:
+            return chart
+
+        chart_title = chart.get("title", chart.get("id", "?"))
+        chart_type = chart.get("type", "bar")
+        logger.info("Chart '%s' — attempting chat-pipeline SQL regeneration", chart_title)
+
+        self._regen_count += 1
+        regen_sql = self._regenerate_sql(
+            f"Query data for a {chart_type} chart titled '{chart_title}'. "
+            f"Return rows with a label column (text/name) and a numeric value column. "
+            f"Use GROUP BY to get multiple data points. Return at least 3 rows."
+        )
+        if not regen_sql:
+            return chart
+
+        # Validate and execute
+        regen_sql = _fix_report_sql(regen_sql)
+        from ai.validator import validate_sql as _val_sql
+        is_safe, _ = _val_sql(regen_sql)
+        if not is_safe:
+            return chart
+
+        regen_result = execute_sql(regen_sql)
+        if not regen_result["success"] or not regen_result["data"]:
+            logger.warning("Chart '%s' regeneration failed: %s",
+                           chart_title, regen_result.get("error", "empty"))
+            return chart
+
+        # Validate regenerated data has 2+ columns and multiple rows
+        regen_data = regen_result["data"]
+        if regen_data and len(regen_data) >= 1:
+            row_keys = list(regen_data[0].keys())
+            if len(row_keys) >= 2:
+                logger.info("Chart '%s' regenerated successfully (%d rows, %d cols)",
+                            chart_title, len(regen_data), len(row_keys))
+                chart["data"] = regen_data
+                chart["sql"] = regen_sql
+                chart.pop("error", None)
+
         return chart
 
     def _execute_table_sql(self, table: dict) -> dict:
@@ -1351,6 +2476,12 @@ class ReportPipeline:
                     question_with_date = question_with_date + "\n" + sql_guide
                     logger.info("SQL guide appended to question (%d chars)", len(sql_guide))
 
+                # ── Analytical framework for report-type-specific guidance ──
+                analytical_guide = self._get_analytical_framework(question)
+                if analytical_guide:
+                    question_with_date = question_with_date + "\n" + analytical_guide
+                    logger.info("Analytical framework appended to question")
+
                 logger.info("Report generation — calling LLM for report blueprint (cache MISS)")
                 logger.info("Question sent to LLM (first 500 chars): %s", question_with_date[:500])
 
@@ -1394,27 +2525,27 @@ class ReportPipeline:
             self._execute_table_sql(report["table"])
 
         # ── Post-processing: remove failed KPIs and empty charts ──────
-        # Remove KPIs that returned N/A or had errors
         if "kpis" in report:
-            valid_kpis = [
-                kpi for kpi in report["kpis"]
-                if kpi.get("value") not in (None, "N/A", "")
-                and not kpi.get("error")
-            ]
-            if valid_kpis:
-                report["kpis"] = valid_kpis
-                logger.info("KPIs after cleanup: %d of %d valid",
-                            len(valid_kpis), len(report.get("kpis", [])))
+            report["kpis"] = self._clean_kpis(report["kpis"])
 
         # Remove charts with empty data, errors, single-column data, or all-zero values
+        # but guarantee at least MIN_CHARTS survive
+        MIN_CHARTS = 6
         if "charts" in report:
+            all_charts = report["charts"]
+            if len(all_charts) < 6:
+                logger.warning("LLM generated only %d charts (expected 6)", len(all_charts))
+
             valid_charts = []
-            for chart in report["charts"]:
+            fallback_charts = []   # errored/zero charts kept as fallback
+            for chart in all_charts:
                 if chart.get("error"):
-                    logger.info("Removing chart '%s' — has error: %s", chart.get("title", "?"), chart.get("error"))
+                    logger.info("Chart '%s' has error: %s", chart.get("title", "?"), chart.get("error"))
+                    fallback_charts.append(chart)
                     continue
                 if not chart.get("data") or len(chart["data"]) == 0:
-                    logger.info("Removing chart '%s' — empty data", chart.get("title", "?"))
+                    logger.info("Chart '%s' has empty data", chart.get("title", "?"))
+                    fallback_charts.append(chart)
                     continue
                 # Check column count — need at least label + value
                 row_keys = list(chart["data"][0].keys()) if chart["data"] else []
@@ -1434,7 +2565,8 @@ class ReportPipeline:
                             row["label"] = f"Item {i+1}"
                         logger.info("Salvaged chart '%s' — added index labels to %d rows", chart.get("title", "?"), len(chart["data"]))
                     else:
-                        logger.info("Removing chart '%s' — only %d columns (need 2+)", chart.get("title", "?"), len(row_keys))
+                        logger.info("Chart '%s' — only %d columns (need 2+)", chart.get("title", "?"), len(row_keys))
+                        fallback_charts.append(chart)
                         continue
                 # Check if all numeric values are zero
                 value_keys = row_keys[1:]
@@ -1443,14 +2575,91 @@ class ReportPipeline:
                     for row in chart["data"]
                 )
                 if all_zero:
-                    logger.info("Removing chart '%s' — all values are zero/null", chart.get("title", "?"))
+                    logger.info("Chart '%s' — all values are zero/null", chart.get("title", "?"))
+                    fallback_charts.append(chart)
                     continue
+
+                # ── Per-row zero filtering for categorical charts ──────
+                # Remove individual rows where every numeric value is 0/null
+                # (e.g. "New: 0" in "New vs Returning" chart).
+                # Only applied to small charts (≤30 rows) so time-series
+                # charts with legitimate zero months are not affected.
+                if len(chart["data"]) <= 30:
+                    _def_zero = {None, 0, "", "0", 0.0}
+                    non_zero_rows = [
+                        row for row in chart["data"]
+                        if any(row.get(k) not in _def_zero for k in value_keys)
+                    ]
+                    if len(non_zero_rows) >= 1 and len(non_zero_rows) < len(chart["data"]):
+                        logger.info(
+                            "Chart '%s': dropped %d zero-value row(s) (kept %d)",
+                            chart.get("title", "?"),
+                            len(chart["data"]) - len(non_zero_rows),
+                            len(non_zero_rows),
+                        )
+                        chart["data"] = non_zero_rows
+
                 valid_charts.append(chart)
+
+            # ── Regenerate failed charts via chat pipeline ─────────────
+            # If we have fewer than 6 valid charts, try to regenerate SQL
+            # for failed charts using the chat pipeline's full chain.
+            if len(valid_charts) < MIN_CHARTS and fallback_charts:
+                for fb in fallback_charts[:]:
+                    if len(valid_charts) >= MIN_CHARTS:
+                        break
+                    chart_title = fb.get("title", "Chart")
+                    chart_type = fb.get("type", "bar")
+                    logger.info(
+                        "Attempting to regenerate chart '%s' via chat pipeline (%d/%d)",
+                        chart_title, len(valid_charts) + 1, MIN_CHARTS
+                    )
+                    regen_sql = self._regenerate_sql(
+                        f"Query data for a {chart_type} chart titled '{chart_title}'. "
+                        f"Return rows with a label column and a numeric value column. "
+                        f"Use GROUP BY to get multiple data points."
+                    )
+                    if regen_sql:
+                        fb["sql"] = regen_sql
+                        fb.pop("error", None)
+                        fb["data"] = []
+                        self._execute_chart_sql(fb)
+                        if fb.get("data") and len(fb["data"]) > 0:
+                            row_keys = list(fb["data"][0].keys())
+                            if len(row_keys) >= 2:
+                                valid_charts.append(fb)
+                                fallback_charts.remove(fb)
+                                logger.info(
+                                    "Chart '%s' regenerated successfully (%d rows)",
+                                    chart_title, len(fb["data"])
+                                )
+                                continue
+                    # Regeneration failed — keep as fallback
+                    logger.warning("Chart '%s' regeneration failed", chart_title)
+
+            # Fill remaining slots from fallbacks if still short
+            if len(valid_charts) < MIN_CHARTS and fallback_charts:
+                needed = MIN_CHARTS - len(valid_charts)
+                # Prefer fallback charts that have data (even with errors) over empty ones
+                fallback_charts.sort(
+                    key=lambda c: (len(c.get("data", [])) > 0, not c.get("error")),
+                    reverse=True,
+                )
+                for fb in fallback_charts[:needed]:
+                    fb.pop("error", None)  # remove error flag so it renders
+                    if not fb.get("data"):
+                        fb["data"] = [{"label": "No data available", "value": 0}]
+                        fb["type"] = "bar"
+                    valid_charts.append(fb)
+                    logger.info("Kept fallback chart '%s' to meet minimum (%d/%d)",
+                                fb.get("title", "?"), len(valid_charts), MIN_CHARTS)
 
             if valid_charts:
                 report["charts"] = valid_charts
-            logger.info("Charts after cleanup: %d of %d valid",
-                        len(valid_charts), len(report.get("charts", [])))
+            logger.info("Charts after cleanup: %d valid, %d fallback (%d total of %d original)",
+                        len([c for c in valid_charts if c not in fallback_charts]),
+                        len([c for c in valid_charts if c in fallback_charts]),
+                        len(valid_charts), len(all_charts))
 
         # ── Smart chart-type auto-correction based on actual data ──────
         if "charts" in report:
@@ -1462,6 +2671,11 @@ class ReportPipeline:
             report["charts"] = self._enforce_chart_diversity(report["charts"])
 
         logger.info("Report generation complete — all SQL executed")
+
+        # ── Rewrite summary using actual KPI values ────────────────────
+        report["summary"] = self._regenerate_summary(
+            report.get("summary", ""), report.get("kpis", [])
+        )
 
         # ── Detect applicable filters based on SQL content ────────────
         applicable_filters = self._detect_applicable_filters(report)
@@ -1554,13 +2768,64 @@ class ReportPipeline:
                 logger.info("Auto-clean chart '%s': cleaned timestamp labels → YYYY-MM (%d points)",
                             chart.get("title", "?"), row_count)
 
+        # ── Fix raw numeric labels ────────────────────────────────────
+        # If the first column (labels) contains large numeric values, columns
+        # might be swapped. Try to detect and fix or format them.
+        if not is_time_series and data and len(keys) >= 2:
+            import re as _re2
+            # Check if labels are all large numbers (>1000) — likely wrong column as label
+            numeric_labels = 0
+            for lbl in labels[:5]:
+                try:
+                    val = float(lbl.replace(",", ""))
+                    if abs(val) > 1000:
+                        numeric_labels += 1
+                except (ValueError, TypeError):
+                    pass
+
+            if numeric_labels >= min(3, len(labels[:5])):
+                # Check if second column has string/name values that should be labels
+                second_key = keys[1] if len(keys) > 1 else None
+                if second_key:
+                    second_vals = [str(row.get(second_key, "")) for row in data[:5]]
+                    non_numeric_count = sum(
+                        1 for v in second_vals
+                        if v and not v.replace(".", "").replace(",", "").replace("-", "").isdigit()
+                    )
+                    if non_numeric_count >= min(3, len(second_vals)):
+                        # Swap columns — second column has the real labels
+                        logger.info("Auto-fix chart '%s': swapping label column '%s' ↔ '%s'",
+                                    chart.get("title", "?"), label_key, second_key)
+                        for row in data:
+                            row[label_key], row[second_key] = row[second_key], row[label_key]
+                        labels = [str(row.get(label_key, "")) for row in data]
+                    else:
+                        # Both columns numeric — format labels for readability
+                        logger.info("Auto-fix chart '%s': formatting numeric labels for readability",
+                                    chart.get("title", "?"))
+                        for row in data:
+                            try:
+                                val = float(str(row.get(label_key, 0)).replace(",", ""))
+                                if abs(val) >= 1_00_00_000:
+                                    row[label_key] = f"₹{val/1_00_00_000:.1f}Cr"
+                                elif abs(val) >= 1_00_000:
+                                    row[label_key] = f"₹{val/1_00_000:.1f}L"
+                                elif abs(val) >= 1000:
+                                    row[label_key] = f"₹{val/1000:.1f}K"
+                                else:
+                                    row[label_key] = f"₹{val:,.0f}"
+                            except (ValueError, TypeError):
+                                pass
+                        labels = [str(row.get(label_key, "")) for row in data]
+
         original_type = chart_type
 
         # Rule 1: Time-series data → line or area (never bar/horizontalBar)
-        if is_time_series and chart_type in ("bar", "horizontalBar", "pie", "doughnut"):
+        # BUT only for dense time-series (6+ points) — ≤5 points look bad as line/area
+        if is_time_series and row_count >= 6 and chart_type in ("bar", "horizontalBar", "pie", "doughnut"):
             chart["type"] = "line"
-            logger.info("Auto-fix chart '%s': %s → line (time-series detected)",
-                        chart.get("title", "?"), original_type)
+            logger.info("Auto-fix chart '%s': %s → line (dense time-series, %d points)",
+                        chart.get("title", "?"), original_type, row_count)
 
         # Rule 2: Too many slices for pie/doughnut → trim to top 6 + "Others"
         elif chart_type in ("pie", "doughnut") and row_count > 8 and value_keys:
@@ -1617,6 +2882,41 @@ class ReportPipeline:
                             chart.get("title", "?"), updated_count)
             except (ValueError, TypeError):
                 pass
+
+        # ── Rule 6: Remove incompatible secondary series (scale ratio > 1000x) ──
+        # e.g. Revenue (crores) + Order Count (hundreds) can NOT share a Y-axis.
+        # The small series becomes invisible and its tooltip shows ₹ which is wrong.
+        # Fix: keep only the primary (largest magnitude) series.
+        current_data = chart.get("data", data)
+        if current_data:
+            current_keys = list(current_data[0].keys())
+            current_vkeys = current_keys[1:]
+            if (len(current_vkeys) > 1
+                    and chart.get("type", "bar").lower() not in ("pie", "doughnut", "stackedbar")):
+                max_by_key = {}
+                for vk in current_vkeys:
+                    try:
+                        mv = max(abs(float(row.get(vk, 0) or 0)) for row in current_data)
+                        max_by_key[vk] = mv
+                    except (ValueError, TypeError):
+                        max_by_key[vk] = 0
+                positive_maxes = {k: v for k, v in max_by_key.items() if v > 0}
+                if len(positive_maxes) >= 2:
+                    max_v = max(positive_maxes.values())
+                    min_v = min(positive_maxes.values())
+                    if min_v > 0 and max_v / min_v > 1000:
+                        primary_key = max(positive_maxes, key=lambda k: positive_maxes[k])
+                        lk = current_keys[0]
+                        for row in current_data:
+                            for vk in list(row.keys()):
+                                if vk != lk and vk != primary_key:
+                                    del row[vk]
+                        chart["data"] = current_data
+                        logger.info(
+                            "Auto-fix chart '%s': removed incompatible series "
+                            "(scale ratio %.0fx, kept '%s')",
+                            chart.get("title", "?"), max_v / min_v, primary_key,
+                        )
 
     @staticmethod
     def _enforce_chart_diversity(charts: list) -> list:
@@ -1850,13 +3150,7 @@ class ReportPipeline:
 
         # ── Post-processing: clean up after filter application ────────
         if "kpis" in report:
-            valid_kpis = [
-                kpi for kpi in report["kpis"]
-                if kpi.get("value") not in (None, "N/A", "")
-                and not kpi.get("error")
-            ]
-            if valid_kpis:
-                report["kpis"] = valid_kpis
+            report["kpis"] = self._clean_kpis(report["kpis"])
 
         if "charts" in report:
             valid_charts = []
@@ -1876,12 +3170,21 @@ class ReportPipeline:
                 if all_zero:
                     continue
                 valid_charts.append(chart)
-            if valid_charts:
-                report["charts"] = valid_charts
+            # Always update — even if empty — so stale pre-filter data is never shown
+            report["charts"] = valid_charts
+
+        # ── Smart chart-type auto-correction (same as generate) ──────────
+        if "charts" in report:
+            for chart in report["charts"]:
+                self._smart_fix_chart_type(chart)
+
+        if "charts" in report and len(report["charts"]) > 1:
+            report["charts"] = self._enforce_chart_diversity(report["charts"])
 
         return {
             "mode": "report",
             "report": report,
+            "applicable_filters": self._detect_applicable_filters(report),
             "ui_instructions": {
                 "create_new_section": True,
                 "open_in_new_tab": True,
@@ -1913,8 +3216,23 @@ class ReportPipeline:
 
         logger.info("Report modification — command: %s", modification)
 
+        # Strip data arrays before sending to LLM — the model only needs structure
+        # and SQL queries, not hundreds of result rows. This prevents token truncation.
+        try:
+            _lean = json.loads(current_report_json) if isinstance(current_report_json, str) else current_report_json
+            _lean_copy = json.loads(json.dumps(_lean))  # deep copy
+            for kpi in _lean_copy.get("kpis", []):
+                kpi.pop("value", None); kpi.pop("error", None)
+            for chart in _lean_copy.get("charts", []):
+                chart.pop("data", None); chart.pop("error", None)
+            if _lean_copy.get("table"):
+                _lean_copy["table"].pop("data", None)
+            lean_json = json.dumps(_lean_copy)
+        except Exception:
+            lean_json = current_report_json  # fallback to original if stripping fails
+
         result = self.report_mod(
-            current_report=current_report_json,
+            current_report=lean_json,
             modification=modification,
             schema_info=schema_str,
         )
@@ -1922,12 +3240,28 @@ class ReportPipeline:
         try:
             report = self._extract_json(result.updated_report_json)
         except (json.JSONDecodeError, ValueError) as exc:
-            logger.error("Failed to parse modified report JSON: %s", exc)
-            return {
-                "mode": "report",
-                "error": f"Failed to modify report: {str(exc)}",
-                "report": None,
-            }
+            logger.warning("Failed to parse modified report JSON (attempt 1): %s — retrying", exc)
+            # ── Retry: ask the LLM to fix its own output ──────────────────
+            try:
+                retry_result = self.report_mod(
+                    current_report=lean_json,
+                    modification=(
+                        f"{modification}\n\n"
+                        "CRITICAL: Your previous response was not valid JSON. "
+                        "Output ONLY a raw JSON object. "
+                        "No markdown, no code fences, no single quotes, no trailing commas. "
+                        "Every key and string value MUST use double quotes."
+                    ),
+                    schema_info=schema_str,
+                )
+                report = self._extract_json(retry_result.updated_report_json)
+            except (json.JSONDecodeError, ValueError) as exc2:
+                logger.error("Failed to parse modified report JSON (attempt 2): %s", exc2)
+                return {
+                    "mode": "report",
+                    "error": f"Failed to modify report: {str(exc2)}",
+                    "report": None,
+                }
 
         # ── Step 2: Detect which chart types were explicitly changed ──────────
         # These are "user-locked" — auto-correction must NOT touch them.
@@ -1954,13 +3288,7 @@ class ReportPipeline:
 
         # ── Post-processing (same as generate) ──────────────────────────
         if "kpis" in report:
-            valid_kpis = [
-                kpi for kpi in report["kpis"]
-                if kpi.get("value") not in (None, "N/A", "")
-                and not kpi.get("error")
-            ]
-            if valid_kpis:
-                report["kpis"] = valid_kpis
+            report["kpis"] = self._clean_kpis(report["kpis"])
 
         if "charts" in report:
             valid_charts = []

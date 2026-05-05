@@ -1,4 +1,4 @@
-# SQLBOT — AI SQL Analyst (Project Overview)
+# SQLBOT — AI SQL Analyst (Project Overview)fd
 
 This document gives a detailed overview of the project:
 - What the app does

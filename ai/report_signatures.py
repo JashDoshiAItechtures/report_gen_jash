@@ -169,9 +169,45 @@ class ReportGeneration(dspy.Signature):
     Design 6 KPIs that give a complete picture of the subject:
     - Each KPI must be SPECIFIC to the subject (not generic)
     - Include a mix: COUNT, VALUE/AMOUNT, RATE/PERCENTAGE metrics
-    - Each KPI SQL returns exactly ONE row with ONE value
+    - Each KPI SQL returns exactly ONE row with ONE value (scalar)
     - Assign different colors: blue, green, purple, orange, red, teal
     - Include rich explanations (what, how, why, insight)
+    - Each KPI must have a UNIQUE value — no two KPIs should show the
+      same number (e.g. don't show "Total PO Value" and "Top Vendors By
+      Value" if they return the same SUM)
+
+    ⚠ KPI VALUE QUALITY — CRITICAL:
+    - Every KPI value MUST be a meaningful, self-explanatory scalar
+    - If a KPI is "Top Product" → the SQL must return the product NAME
+      (e.g. SELECT pm.product_name ... ORDER BY revenue DESC LIMIT 1),
+      NOT a count like "1"
+    - If a KPI is "Growth" or "Change" → the SQL must return a PERCENTAGE
+      (e.g. ROUND(100.0 * (new - old) / NULLIF(old, 0), 2) AS value),
+      NOT a raw count
+    - If a KPI is "Best Month" → return the month NAME (e.g. 'February 2025'),
+      NOT a number
+    - RULE: If the KPI label implies a name/text answer, the SQL MUST
+      return that name/text. If it implies a numeric measure, return
+      the actual calculated number with proper units.
+
+    ⚠ BANNED KPI TYPES — the following are CHART metrics, NOT KPIs:
+    - "Top 5 ...", "Top 10 ...", "Top-Selling ..." → list/ranking metrics
+    - "Revenue Growth", "Growth Rate" → growth is a TREND, not a scalar
+      (UNLESS the SQL calculates the actual % change as a single number)
+    - "... Trend" → trends are LINE CHARTS, not scalar values
+    - "... Distribution" → distributions are PIE/BAR CHARTS
+    - "... Breakdown", "... Composition" → CHARTS, not single values
+    - "... Concentration" → meaningless as a single number
+    - "... By Month/Category/..." → grouping = CHART, not KPI
+    - "... Ranking", "Most Popular ..." → list/chart metrics
+
+    GOOD KPIs (scalar aggregates — each must return a DIFFERENT number):
+    ✓ Total Revenue, Total Orders, Average Order Value
+    ✓ Customer Count, Active Vendors, Order Fulfillment Rate
+    ✓ Average Line Total, Total Quantity Sold, Repeat Customer Rate
+    ✓ Highest Performing Product (returns product NAME)
+    ✓ YoY Growth % (returns calculated percentage)
+    ✓ Peak Month (returns month name string)
 
     ══════════════════════════════════════════════════════════════
     STEP 3 — CHART DESIGN: EXACTLY 6 CHARTS (MANDATORY)
@@ -179,21 +215,41 @@ class ReportGeneration(dspy.Signature):
     Design 6 charts that answer 6 DIFFERENT business questions about
     the subject. Each chart must add NEW information.
 
+    ⚠⚠⚠ CHART DIVERSITY — ABSOLUTE RULE ⚠⚠⚠
+    NO chart type may appear MORE THAN 2 TIMES across all 6 charts.
+    You MUST use at least 4 DIFFERENT chart types.
+    Each chart MUST analyze a DIFFERENT data dimension:
+      - Chart 1: Trend over time (line) — e.g. monthly/yearly trend
+      - Chart 2: Category breakdown (bar) — e.g. by product category
+      - Chart 3: Top-N ranking (horizontalBar) — e.g. top products/customers
+      - Chart 4: Share/proportion (pie or doughnut) — e.g. category share
+      - Chart 5: Comparison (stackedBar or bar) — e.g. multi-series comparison
+      - Chart 6: Distribution or different angle (area/doughnut/bar)
+    Do NOT make 6 charts that all show "metric by year" — that is BORING.
+    Each chart must explore a DIFFERENT angle of the data.
+
+    SPARSE DATA RULE (≤5 data points):
+    If a chart query returns ≤5 rows (e.g. 3 years), use bar or doughnut
+    — NOT line or area. Line/area charts look bad with very few points.
+    Only use line/area when the data has 6+ data points.
+
     CHART TYPE SELECTION (based on data shape):
-    - Trend over time → line
-    - Growth / cumulative → area
+    - Trend over time (6+ points) → line
+    - Growth / cumulative (6+ points) → area
     - Category comparison (≤8 items) → bar
     - Ranking / long labels (>8 items) → horizontalBar
     - Part-of-whole / share (≤8 slices) → pie or doughnut
     - Multi-series composition over time → stackedBar
+    - Few data points (≤5 rows) → bar, doughnut, or pie (NEVER line/area)
 
     RULES:
-    - Use AT LEAST 5 DIFFERENT chart types across 6 charts
+    - ⚠ NO MORE THAN 2 of the same chart type (HARD LIMIT)
+    - Use at least 4 DIFFERENT chart types across 6 charts
     - BANNED types: polarArea, radar, scatter
     - Assign different color_scheme to each: blues, greens, purples,
       oranges, mixed, gradient
     - No two charts may show the same metric on the same dimension
-    - Chart 1 should be a trend (line chart)
+    - Each chart must answer a DIFFERENT business question
 
     ⚠⚠⚠ CRITICAL CHART SQL RULE ⚠⚠⚠
     EVERY chart SQL MUST use SELECT with 2+ columns:
@@ -297,9 +353,13 @@ class ReportGeneration(dspy.Signature):
     ✓ EVERY SQL query scopes data to the subject via JOINs/WHEREs
     ✓ EVERY insight is specifically about the subject
     ✓ kpis array has exactly 6 items
+    ✓ Every KPI value is meaningful (names for name-KPIs, % for growth-KPIs)
     ✓ charts array has exactly 6 items
-    ✓ At least 5 different chart types used
+    ✓ NO chart type used more than 2 times (HARD LIMIT)
+    ✓ At least 4 different chart types used
+    ✓ Each chart explores a different data dimension (not all "by year")
     ✓ No polarArea, radar, or scatter charts
+    ✓ Charts with ≤5 data points use bar/doughnut (NOT line/area)
     ✓ insights array has 6-8 items
     ✓ All SQL is valid PostgreSQL using ONLY columns from schema_info
     ✓ No SQL references columns on wrong tables
@@ -358,6 +418,21 @@ class ReportModification(dspy.Signature):
     schema_info = dspy.InputField(desc="Database schema for writing valid SQL")
 
     updated_report_json = dspy.OutputField(
-        desc="Complete updated report JSON with modifications applied. Must be valid JSON. "
-             "No markdown fences. No text before or after the JSON object."
-    )
+    desc="""
+Return ONLY a valid JSON object.
+
+STRICT RULES (MANDATORY):
+- Output MUST be valid JSON parsable by json.loads()
+- ALL keys MUST be enclosed in DOUBLE QUOTES (")
+- ALL string values MUST use DOUBLE QUOTES (")
+- DO NOT use single quotes (')
+- DO NOT include trailing commas
+- DO NOT include comments
+- DO NOT include markdown (no ```json)
+- DO NOT include any explanation or text outside the JSON
+
+The output must exactly match the structure of the input report.
+
+If you violate JSON format, the system will fail.
+"""
+)

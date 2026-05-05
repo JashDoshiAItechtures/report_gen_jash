@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/style.css?v=20260410" />
+    <link rel="stylesheet" href="/static/style.css?v=20260504c" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -78,18 +78,6 @@
                     </button>
                 </div>
             </div>
-
-            <div class="model-switcher mode-switcher-area">
-                <span class="switcher-label">Mode</span>
-                <div class="switcher-track mode-track" id="modeSwitcher">
-                    <button class="switcher-btn active" data-mode="chat">
-                        <span class="btn-dot"></span>SQL Chat
-                    </button>
-                    <button class="switcher-btn" data-mode="report">
-                        <span class="btn-dot"></span>Report
-                    </button>
-                </div>
-            </div>
         </div>
 
         <!-- Chat thread -->
@@ -104,18 +92,14 @@
                     </svg>
                 </div>
                 <h2>AI SQL Analyst</h2>
-                <p>Ask anything about your data. I'll write the SQL, run it, and explain the results.</p>
+                <p>Ask anything about your data. I'll write the SQL, run it, and explain the results.<br><span style="opacity:0.7;font-size:0.85em">You can also ask me to generate comprehensive analytics reports.</span></p>
                 <div class="welcome-chips" id="welcomeChips">
                     <button class="chip" data-q="What is the total revenue this year?">Total revenue this year</button>
                     <button class="chip" data-q="Top 10 customers by revenue">Top 10 customers</button>
                     <button class="chip" data-q="Which vendor has the highest purchase order value?">Top vendor by PO value</button>
                     <button class="chip" data-q="What is the average order value?">Average order value</button>
-                </div>
-                <div class="welcome-chips welcome-chips-report hidden" id="welcomeChipsReport">
-                    <button class="chip chip-report" data-q="Show me the sales performance report">Sales Performance Report</button>
-                    <button class="chip chip-report" data-q="Show me the top 10 gold products analysis">Top Gold Products Analysis</button>
-                    <button class="chip chip-report" data-q="Revenue analysis by category">Revenue by Category</button>
-                    <button class="chip chip-report" data-q="Customer concentration and order analysis">Customer Analysis</button>
+                    <button class="chip chip-report" data-q="Generate a sales performance report"> Sales Performance Report</button>
+                    <button class="chip chip-report" data-q="Generate a gold products analysis report"> Gold Products Analysis</button>
                 </div>
             </div>
             <!-- Messages injected here -->
@@ -169,6 +153,6 @@
     </div>
 </div>
 
-<script src="/static/script.js?v=20260410"></script>
+<script src="/static/script.js?v=20260504c"></script>
 </body>
 </html>

@@ -789,14 +789,12 @@ class InterpretAndInsight(dspy.Signature):
     """Interpret SQL query results for a non-technical user and generate insights.
 
     All monetary values are in INDIAN RUPEES (INR).
-    When talking about amounts, you MUST:
-    - Prefer the Indian number system (thousands, lakhs, crores) instead of millions/billions.
-    - Example conversions:
-        - 1,00,000  = 1 lakh
-        - 10,00,000 = 10 lakhs
-        - 1,00,00,000 = 1 crore
+    The query_results data already contains pre-computed Indian notation annotations in the format
+    "₹118.36 Cr" or "₹45.20 L".
+    YOU MUST use these pre-computed values EXACTLY as shown — do NOT recalculate from the raw number.
+    1 crore = 1,00,00,000 = 10,000,000 (ten million). 1 lakh = 1,00,000 = 100,000.
     - Never say "million" or "billion". Use "lakhs" and "crores" instead when numbers are large.
-    - If exact conversion is unclear, keep numbers as raw INR amounts with commas (e.g., 12,34,56,789 INR).
+    - If a value shows "₹118.36 Cr", write "118.36 crores" — do not recompute.
 
     1. Summarize the main findings in plain English (2-3 sentences)
     2. Identify patterns, dominant contributors, outliers, and business implications"""
