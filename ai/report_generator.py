@@ -3286,9 +3286,13 @@ class ReportPipeline:
         if "table" in report and report["table"]:
             self._execute_table_sql(report["table"])
 
-        # ── Post-processing (same as generate) ──────────────────────────
+        # ── Post-processing (same as generate, but lighter for add operations) ──
+        _is_add_kpi = bool(re.search(r'\badd\b.*\bkpi\b', modification, re.IGNORECASE))
         if "kpis" in report:
-            report["kpis"] = self._clean_kpis(report["kpis"])
+            if _is_add_kpi:
+                logger.info("Skipping _clean_kpis — user explicitly added a KPI")
+            else:
+                report["kpis"] = self._clean_kpis(report["kpis"])
 
         if "charts" in report:
             valid_charts = []
