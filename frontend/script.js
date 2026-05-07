@@ -18,7 +18,7 @@
     const welcomeChips   = document.getElementById("welcomeChips");
     const topbarTitle    = document.getElementById("topbarTitle");
 
-    let selectedProvider = "groq";
+    let selectedProvider = "claude";
     let isLoading        = false;
     const currentMode    = "chat"; // Always chat — unified mode
 

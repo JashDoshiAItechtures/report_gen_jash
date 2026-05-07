@@ -608,7 +608,7 @@
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         report: originalReport,
-                        provider: sessionStorage.getItem(reportId + "_provider") || "groq",
+                        provider: sessionStorage.getItem(reportId + "_provider") || "claude",
                         ...filters,
                     }),
                 });
@@ -626,7 +626,7 @@
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         question: question,
-                        provider: sessionStorage.getItem(reportId + "_provider") || "groq",
+                        provider: sessionStorage.getItem(reportId + "_provider") || "claude",
                         ...filters,
                     }),
                 });
@@ -1990,7 +1990,7 @@
                 body: JSON.stringify({
                     report_json: JSON.stringify(clean),
                     modification: command,
-                    provider: "groq",
+                    provider: "claude",
                 }),
             });
             typEl.remove();
@@ -2276,7 +2276,7 @@
                     const res = await fetch("/report/modify", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ report_json: JSON.stringify(clean), modification: mod, provider: "groq" })
+                        body: JSON.stringify({ report_json: JSON.stringify(clean), modification: mod, provider: "claude" })
                     });
                     const data = await res.json();
                     if (data.error || !data.report) {

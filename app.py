@@ -64,7 +64,7 @@ app.add_middleware(
 
 class QuestionRequest(BaseModel):
     question: str
-    provider: str = "groq"       # "groq" | "openai"
+    provider: str = "claude"     # "claude" | "groq" | "openai"
     conversation_id: str | None = None
 
 
@@ -95,7 +95,7 @@ class ChatResponse(BaseModel):
 
 class ReportRequest(BaseModel):
     question: str
-    provider: str = "groq"
+    provider: str = "claude"    # "claude" | "groq" | "openai"
     conversation_id: str | None = None
     force_refresh: bool = False  # bypass cache for fresh report
     # Filters
@@ -117,13 +117,13 @@ class ReportApplyFiltersRequest(BaseModel):
     customer: str | None = None
     status: str | None = None
     product: str | None = None
-    provider: str = "groq"
+    provider: str = "claude"
 
 
 class ReportModifyRequest(BaseModel):
     report_json: str
     modification: str
-    provider: str = "groq"
+    provider: str = "claude"
 
 
 # ── Endpoints ───────────────────────────────────────────────────────────────
@@ -335,7 +335,6 @@ def chat_stream_endpoint(req: QuestionRequest):
 @app.post("/report")
 def report_endpoint(req: ReportRequest):
     """Generate a full analytics report from a natural-language question."""
-    from ai.report_generator import ReportPipeline
 
     # Build filter context string for the LLM
     filters = []
@@ -360,9 +359,18 @@ def report_endpoint(req: ReportRequest):
 
     question_with_filters = req.question + filter_ctx
 
-    logger.info("REPORT request | question=%s | filters=%s", req.question, filter_ctx or "none")
-    pipeline = ReportPipeline(provider=req.provider)
-    return pipeline.generate(question_with_filters, force_refresh=req.force_refresh)
+    logger.info("REPORT request | provider=%s | question=%s | filters=%s",
+                req.provider, req.question, filter_ctx or "none")
+
+    if req.provider == "claude":
+        from ai.claude_multi_agent import ClaudeReportPipeline
+        pipeline = ClaudeReportPipeline()
+        return pipeline.generate(question_with_filters, force_refresh=req.force_refresh)
+    else:
+        # Legacy DSPy pipeline (Groq/OpenAI)
+        from ai.report_generator import ReportPipeline
+        pipeline = ReportPipeline(provider=req.provider)
+        return pipeline.generate(question_with_filters, force_refresh=req.force_refresh)
 
 
 @app.post("/report/apply-filters")
