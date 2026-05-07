@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/style.css?v=20260504b" />
+    <link rel="stylesheet" href="/static/style.css?v=20260506a" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
@@ -710,9 +710,123 @@
         .pdf-capture-mode .chart-filter-toggle,
         .pdf-capture-mode .chart-filter-panel,
         .pdf-capture-mode .chart-active-filters,
-        .pdf-capture-mode .edit-card-overlay {
+        .pdf-capture-mode .edit-card-overlay,
+        .pdf-capture-mode .chart-ai-panel,
+        .pdf-capture-mode .chart-ai-modify-btn {
             display: none !important;
         }
+
+        /* ── Per-chart AI Modify button ─────────────────── */
+        .chart-ai-modify-btn {
+            display: flex; align-items: center; justify-content: center;
+            width: 26px; height: 26px; border-radius: 7px; cursor: pointer; border: none;
+            background: rgba(139,92,246,0.1); color: #8b5cf6;
+            transition: all 0.18s; flex-shrink: 0;
+        }
+        .chart-ai-modify-btn svg { width: 13px; height: 13px; }
+        .chart-ai-modify-btn:hover { background: rgba(139,92,246,0.22); }
+        .chart-ai-modify-btn.active { background: rgba(139,92,246,0.25); color: #7c3aed; }
+
+        /* ── Per-chart inline AI panel ───────────────────── */
+        .chart-ai-panel {
+            display: none; flex-direction: column;
+            border-top: 1px solid rgba(139,92,246,0.18);
+            background: linear-gradient(135deg, rgba(139,92,246,0.04), rgba(99,102,241,0.02));
+            border-radius: 0 0 12px 12px;
+            overflow: hidden;
+        }
+        .chart-ai-panel.open { display: flex; }
+        .chart-ai-panel-header {
+            display: flex; align-items: center; gap: 0.4rem;
+            padding: 0.5rem 0.75rem 0.25rem;
+            font-size: 0.65rem; font-weight: 800; text-transform: uppercase;
+            letter-spacing: 0.07em; color: #8b5cf6;
+        }
+        .chart-ai-panel-header svg { width: 12px; height: 12px; flex-shrink: 0; }
+        .chart-ai-messages {
+            display: flex; flex-direction: column; gap: 0.45rem;
+            padding: 0.25rem 0.75rem 0.5rem; max-height: 160px; overflow-y: auto;
+        }
+        .caim-user {
+            align-self: flex-end;
+            background: rgba(139,92,246,0.12); color: #6d28d9;
+            border-radius: 8px 8px 2px 8px; padding: 0.3rem 0.6rem;
+            font-size: 0.73rem; line-height: 1.45; max-width: 88%;
+        }
+        .caim-ai {
+            align-self: flex-start;
+            background: var(--bg-card); border: 1px solid var(--border-subtle);
+            border-radius: 8px 8px 8px 2px; padding: 0.3rem 0.6rem;
+            font-size: 0.73rem; line-height: 1.45; color: var(--text-secondary); max-width: 92%;
+        }
+        .caim-ai.ok  { border-color: rgba(16,185,129,0.3); color: #059669; background: rgba(16,185,129,0.05); }
+        .caim-ai.err { border-color: rgba(244,63,94,0.3);  color: #f43f5e; background: rgba(244,63,94,0.05); }
+        .caim-typing { display: flex; align-items: center; gap: 4px; padding: 0.3rem 0.6rem; }
+        .caim-typing span { width:5px; height:5px; background:#8b5cf6; border-radius:50%; animation:caimBlink 1.2s infinite; }
+        .caim-typing span:nth-child(2) { animation-delay:0.2s; }
+        .caim-typing span:nth-child(3) { animation-delay:0.4s; }
+        @keyframes caimBlink { 0%,60%,100%{opacity:0.3;transform:scale(0.9)} 30%{opacity:1;transform:scale(1.2)} }
+        .chart-ai-input-row {
+            display: flex; align-items: center; gap: 0.4rem;
+            padding: 0.45rem 0.6rem 0.6rem;
+            border-top: 1px solid rgba(139,92,246,0.1);
+        }
+        .chart-ai-input {
+            flex: 1; font-family: 'Inter', sans-serif; font-size: 0.75rem;
+            padding: 0.38rem 0.65rem; border-radius: 8px; resize: none;
+            border: 1.5px solid var(--border-subtle); background: var(--bg-main);
+            color: var(--text-primary); outline: none; max-height: 72px;
+            transition: border-color 0.18s;
+        }
+        .chart-ai-input:focus { border-color: #8b5cf6; }
+        .chart-ai-send-btn {
+            width: 30px; height: 30px; flex-shrink: 0; border: none; cursor: pointer;
+            background: #8b5cf6; color: white; border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.18s; box-shadow: 0 2px 6px rgba(139,92,246,0.35);
+        }
+        .chart-ai-send-btn:hover { background: #7c3aed; }
+        .chart-ai-send-btn:disabled { opacity: 0.45; pointer-events: none; }
+        .chart-ai-send-btn svg { width: 13px; height: 13px; }
+        .chart-ai-suggestion-row {
+            display: flex; flex-wrap: wrap; gap: 0.3rem;
+            padding: 0.35rem 0.75rem 0;
+        }
+        .chart-ai-suggestion {
+            font-family: 'Inter', sans-serif; font-size: 0.67rem; font-weight: 500;
+            padding: 0.22rem 0.55rem; border-radius: 6px; cursor: pointer;
+            background: var(--bg-main); color: var(--text-muted);
+            border: 1px solid var(--border-subtle); transition: all 0.14s;
+        }
+        .chart-ai-suggestion:hover { background: rgba(139,92,246,0.1); color: #8b5cf6; border-color: rgba(139,92,246,0.25); }
+
+        /* ── Eye Modal — Detailed Sections (image 3 style) ─── */
+        .explain-section-row {
+            display: flex; gap: 0.75rem; margin-bottom: 1rem; align-items: flex-start;
+        }
+        .explain-section-row:last-child { margin-bottom: 0; }
+        .explain-section-icon {
+            width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .explain-section-icon svg { width: 18px; height: 18px; }
+        .explain-section-icon.icon-what { background: rgba(59,130,246,0.1); color: var(--accent-blue); }
+        .explain-section-icon.icon-how { background: rgba(139,92,246,0.1); color: #8b5cf6; }
+        .explain-section-icon.icon-why { background: rgba(16,185,129,0.1); color: #10b981; }
+        .explain-section-icon.icon-insight { background: rgba(245,158,11,0.1); color: var(--accent-amber); }
+        .explain-section-content { flex: 1; }
+        .explain-section-label-v2 {
+            font-size: 0.62rem; font-weight: 800; text-transform: uppercase;
+            letter-spacing: 0.08em; margin-bottom: 0.3rem;
+        }
+        .explain-section-label-v2.lbl-what { color: var(--accent-blue); }
+        .explain-section-label-v2.lbl-how { color: #8b5cf6; }
+        .explain-section-label-v2.lbl-why { color: #10b981; }
+        .explain-section-label-v2.lbl-insight { color: var(--accent-amber); }
+        .explain-section-text-v2 {
+            font-size: 0.82rem; line-height: 1.65; color: var(--text-secondary);
+        }
+        .explain-divider { height: 1px; background: var(--border-subtle); margin: 0.75rem 0; }
 
         /* ── Print / PDF — professional output ────────────── */
         @media print {
@@ -874,6 +988,6 @@
 </div>
 
 
-<script src="/static/report.js?v=20260504h"></script>
+<script src="/static/report.js?v=20260506d"></script>
 </body>
 </html>

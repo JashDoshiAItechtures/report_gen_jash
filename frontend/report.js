@@ -304,6 +304,9 @@
                             ${hasExplanation ? `<button class="kpi-eye-btn" data-explain='${escapeAttr(JSON.stringify(chart.explanation))}' data-title="${escapeAttr(chart.title || "Chart")}">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                             </button>` : ""}
+                            <button class="chart-ai-modify-btn" data-chart-ai-idx="${idx}" title="AI Modify this chart">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+                            </button>
                             <div class="chart-dl-wrapper" data-chart-dl-idx="${idx}">
                                 <button class="chart-dl-btn" title="Download this chart">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -322,6 +325,26 @@
                     <div class="chart-filter-panel" id="chartFilterPanel_${idx}"></div>
                     <div class="chart-body">
                         <canvas id="chart_${idx}"></canvas>
+                    </div>
+                    <div class="chart-ai-panel" id="chartAiPanel_${idx}">
+                        <div class="chart-ai-panel-header">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+                            AI MODIFY
+                        </div>
+                        <div class="chart-ai-suggestion-row">
+                            <button class="chart-ai-suggestion" data-caim-idx="${idx}" data-q="convert to line chart">convert to line</button>
+                            <button class="chart-ai-suggestion" data-caim-idx="${idx}" data-q="convert to bar chart">convert to bar</button>
+                            <button class="chart-ai-suggestion" data-caim-idx="${idx}" data-q="convert to pie chart">convert to pie</button>
+                            <button class="chart-ai-suggestion" data-caim-idx="${idx}" data-q="show top 5">top 5</button>
+                            <button class="chart-ai-suggestion" data-caim-idx="${idx}" data-q="show top 10">top 10</button>
+                        </div>
+                        <div class="chart-ai-messages" id="chartAiMsgs_${idx}"></div>
+                        <div class="chart-ai-input-row">
+                            <textarea class="chart-ai-input" id="chartAiInput_${idx}" rows="1" placeholder='e.g. "show top 5", "convert to line", "filter Mumbai"'></textarea>
+                            <button class="chart-ai-send-btn" id="chartAiSend_${idx}" data-chart-ai-idx="${idx}" title="Send">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                            </button>
+                        </div>
                     </div>
                 </div>`;
             });
@@ -434,6 +457,47 @@
                 const explanation = JSON.parse(btn.dataset.explain);
                 const title = btn.dataset.title || "Explanation";
                 showExplanationModal(title, explanation);
+            });
+        });
+
+        // ── Wire per-chart AI Modify buttons ──────────────────────────────
+        content.querySelectorAll(".chart-ai-modify-btn").forEach(btn => {
+            btn.addEventListener("click", e => {
+                e.stopPropagation();
+                const idx = btn.dataset.chartAiIdx;
+                const panel = document.getElementById(`chartAiPanel_${idx}`);
+                if (!panel) return;
+                const isOpen = panel.classList.contains("open");
+                content.querySelectorAll(".chart-ai-panel.open").forEach(p => p.classList.remove("open"));
+                content.querySelectorAll(".chart-ai-modify-btn.active").forEach(b => b.classList.remove("active"));
+                if (!isOpen) {
+                    panel.classList.add("open");
+                    btn.classList.add("active");
+                    const inp = document.getElementById(`chartAiInput_${idx}`);
+                    if (inp) setTimeout(() => inp.focus(), 60);
+                }
+            });
+        });
+
+        // ── Wire per-chart AI suggestion chips ────────────────────────────
+        content.querySelectorAll(".chart-ai-suggestion").forEach(chip => {
+            chip.addEventListener("click", () => {
+                const idx = chip.dataset.caimIdx;
+                const inp = document.getElementById(`chartAiInput_${idx}`);
+                if (inp) { inp.value = chip.dataset.q; inp.focus(); }
+            });
+        });
+
+        // ── Wire per-chart AI send buttons ────────────────────────────────
+        content.querySelectorAll(".chart-ai-send-btn").forEach(btn => {
+            btn.addEventListener("click", () => _chartAiSend(btn.dataset.chartAiIdx));
+        });
+        content.querySelectorAll(".chart-ai-input").forEach(inp => {
+            inp.addEventListener("keydown", e => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    _chartAiSend(inp.id.replace("chartAiInput_", ""));
+                }
             });
         });
 
@@ -1439,14 +1503,44 @@
 
     function showExplanationModal(title, explanation) {
         explainTitle.textContent = title;
-        // Build a flowing paragraph from all explanation fields
-        const parts = [];
-        if (explanation.what) parts.push(explanation.what);
-        if (explanation.how) parts.push(explanation.how);
-        if (explanation.why) parts.push(explanation.why);
-        if (explanation.insight) parts.push(explanation.insight);
-        const fullText = parts.join(". ").replace(/\.\.\s*/g, ". ").replace(/\s+/g, " ").trim();
-        explainBody.innerHTML = `<div style="font-size:0.82rem;line-height:1.75;color:var(--text-secondary);padding:0.25rem 0">${escapeHtml(fullText)}</div>`;
+
+        const sections = [
+            {
+                key: "what", label: "WHAT IT SHOWS", cls: "what",
+                icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
+            },
+            {
+                key: "how", label: "HOW IT'S BUILT", cls: "how",
+                icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`,
+            },
+            {
+                key: "why", label: "WHY IT MATTERS", cls: "why",
+                icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`,
+            },
+            {
+                key: "insight", label: "KEY INSIGHT", cls: "insight",
+                icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 017 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 01-1 1H9a1 1 0 01-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 017-7z"/><line x1="9" y1="21" x2="15" y2="21"/></svg>`,
+            },
+        ];
+
+        const available = sections.filter(s => explanation[s.key]);
+        let html = "";
+        available.forEach((s, i) => {
+            if (i > 0) html += `<div class="explain-divider"></div>`;
+            html += `<div class="explain-section-row">
+                <div class="explain-section-icon icon-${s.cls}">${s.icon}</div>
+                <div class="explain-section-content">
+                    <div class="explain-section-label-v2 lbl-${s.cls}">${s.label}</div>
+                    <div class="explain-section-text-v2">${escapeHtml(explanation[s.key])}</div>
+                </div>
+            </div>`;
+        });
+
+        if (!html) {
+            html = `<div style="font-size:0.82rem;line-height:1.75;color:var(--text-secondary);padding:0.25rem 0">No explanation available.</div>`;
+        }
+
+        explainBody.innerHTML = html;
         explainOverlay.classList.remove("hidden");
     }
 
@@ -1854,6 +1948,77 @@
         excelBtn.disabled = false;
         excelBtn.innerHTML = origText;
     });
+
+    // ── Per-chart AI Modify ───────────────────────────────────────────────
+    async function _chartAiSend(idx) {
+        const inp     = document.getElementById(`chartAiInput_${idx}`);
+        const sendBtn = document.getElementById(`chartAiSend_${idx}`);
+        const msgs    = document.getElementById(`chartAiMsgs_${idx}`);
+        if (!inp || !sendBtn || !msgs) return;
+
+        const text = inp.value.trim();
+        if (!text) return;
+
+        // Append user bubble
+        const uEl = document.createElement("div");
+        uEl.className = "caim-user"; uEl.textContent = text;
+        msgs.appendChild(uEl); msgs.scrollTop = msgs.scrollHeight;
+
+        inp.value = ""; sendBtn.disabled = true;
+
+        // Typing indicator
+        const typEl = document.createElement("div");
+        typEl.className = "caim-ai caim-typing";
+        typEl.innerHTML = "<span></span><span></span><span></span>";
+        msgs.appendChild(typEl); msgs.scrollTop = msgs.scrollHeight;
+
+        try {
+            // Build a targeted command: prepend chart title so LLM knows which chart
+            const chartSpec = (currentReport.charts || [])[parseInt(idx)];
+            const chartTitle = chartSpec ? (chartSpec.title || `chart ${idx}`) : `chart ${idx}`;
+            const command = `For the chart titled "${chartTitle}": ${text}`;
+
+            const clean = JSON.parse(JSON.stringify(currentReport));
+            clean.kpis   = (clean.kpis   || []).filter(k => !k._placeholder);
+            clean.charts = (clean.charts || []).filter(c => !c._placeholder);
+            if (clean.charts) clean.charts.forEach(c => { delete c.data; });
+            if (clean.kpis)   clean.kpis.forEach(k => { delete k.value; });
+
+            const res = await fetch("/report/modify", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    report_json: JSON.stringify(clean),
+                    modification: command,
+                    provider: "groq",
+                }),
+            });
+            typEl.remove();
+
+            if (!res.ok) throw new Error("Server error " + res.status);
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+
+            const okEl = document.createElement("div");
+            okEl.className = "caim-ai ok";
+            okEl.textContent = "\u2713 " + (data.summary || "Chart updated successfully.");
+            msgs.appendChild(okEl); msgs.scrollTop = msgs.scrollHeight;
+
+            currentReport = data.report;
+            _persistReport();
+            try { Object.values(Chart.instances).forEach(inst => inst.destroy()); } catch (_) {}
+            renderReport(currentReport, { skipAnimation: true });
+            if (editModeActive) setTimeout(_attachEditControls, 60);
+
+        } catch (err) {
+            typEl.remove();
+            const errEl = document.createElement("div");
+            errEl.className = "caim-ai err";
+            errEl.textContent = "\u274C " + (err.message || "Modification failed.");
+            msgs.appendChild(errEl); msgs.scrollTop = msgs.scrollHeight;
+        }
+        sendBtn.disabled = false;
+    }
 
     // ── Initialize ────────────────────────────────────────────────────────
     renderReport(currentReport);
