@@ -828,6 +828,32 @@
         }
         .explain-divider { height: 1px; background: var(--border-subtle); margin: 0.75rem 0; }
 
+        /* SQL section in eye modal */
+        .explain-section-icon.icon-sql { background: rgba(6,182,212,0.1); color: #06b6d4; }
+        .explain-section-label-v2.lbl-sql { color: #06b6d4; }
+        .explain-sql-block {
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.72rem; line-height: 1.6;
+            background: rgba(15,23,42,0.85); color: #e2e8f0;
+            padding: 0.75rem 1rem; border-radius: 10px;
+            overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+            margin: 0.25rem 0 0; border: 1px solid rgba(148,163,184,0.15);
+        }
+
+        /* Bulleted summary */
+        .summary-bullets {
+            list-style: none; padding: 0; margin: 0;
+        }
+        .summary-bullets li {
+            position: relative; padding-left: 1.2rem; margin-bottom: 0.55rem;
+            font-size: 0.82rem; line-height: 1.78; color: var(--text-secondary);
+        }
+        .summary-bullets li::before {
+            content: '▸'; position: absolute; left: 0; top: 0;
+            color: var(--accent-indigo); font-weight: 700; font-size: 0.9rem;
+        }
+        .summary-bullets li:last-child { margin-bottom: 0; }
+
         /* ── Print / PDF — professional output ────────────── */
         @media print {
             /* Hide all UI chrome */

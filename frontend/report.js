@@ -168,11 +168,27 @@
 
 
 
-        // ── Summary ───────────────────────────────────────────────────────
+        // ── Summary — Bulleted for readability ──────────────────────────
         if (summary) {
-            html += `<div class="report-summary stream-section">
-                <div class="report-summary-text">${escapeHtml(summary)}</div>
-            </div>`;
+            // Split summary into sentences for bullet rendering
+            const sentences = summary
+                .split(/(?<=\.)\s+(?=[A-Z₹\d])/)
+                .map(s => s.trim())
+                .filter(s => s.length > 0);
+
+            if (sentences.length > 2) {
+                // Multi-sentence → render as bullet list
+                html += `<div class="report-summary stream-section">
+                    <ul class="summary-bullets">
+                        ${sentences.map(s => `<li>${escapeHtml(s)}</li>`).join("")}
+                    </ul>
+                </div>`;
+            } else {
+                // Short summary → keep as paragraph
+                html += `<div class="report-summary stream-section">
+                    <div class="report-summary-text">${escapeHtml(summary)}</div>
+                </div>`;
+            }
         }
 
         // ── KPIs ──────────────────────────────────────────────────────────
@@ -211,10 +227,11 @@
                 }
                 const val = formatKPIValue(kpi.value, kpi.format);
                 const hasExplanation = kpi.explanation && (kpi.explanation.what || kpi.explanation.how);
+                const kpiExplainData = hasExplanation ? {...kpi.explanation, sql: kpi.sql || ""} : null;
                 html += `<div class="kpi-card">
                     <div class="kpi-header">
                         <div class="kpi-label">${escapeHtml(kpi.label || kpi.id || "Metric")}</div>
-                        ${hasExplanation ? `<button class="kpi-eye-btn" data-explain='${escapeAttr(JSON.stringify(kpi.explanation))}' data-title="${escapeAttr(kpi.label || kpi.id || "Metric")}">
+                        ${kpiExplainData ? `<button class="kpi-eye-btn" data-explain='${escapeAttr(JSON.stringify(kpiExplainData))}' data-title="${escapeAttr(kpi.label || kpi.id || "Metric")}">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                         </button>` : ""}
                     </div>
@@ -296,12 +313,13 @@
                     return;
                 }
                 const hasExplanation = chart.explanation && (chart.explanation.what || chart.explanation.how);
+                const chartExplainData = hasExplanation ? {...chart.explanation, sql: chart.sql || ""} : null;
                 html += `<div class="chart-card${isWide ? " chart-full-width" : ""}" data-chart-idx="${idx}">
                     <div class="chart-header">
                         <span class="chart-title">${escapeHtml(chart.title || "Chart " + (idx + 1))}</span>
                         <div class="chart-active-filters" id="chartActiveFilters_${idx}"></div>
                         <div style="display:flex;align-items:center;gap:0.25rem;margin-left:auto">
-                            ${hasExplanation ? `<button class="kpi-eye-btn" data-explain='${escapeAttr(JSON.stringify(chart.explanation))}' data-title="${escapeAttr(chart.title || "Chart")}">
+                            ${chartExplainData ? `<button class="kpi-eye-btn" data-explain='${escapeAttr(JSON.stringify(chartExplainData))}' data-title="${escapeAttr(chart.title || "Chart")}">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                             </button>` : ""}
                             <button class="chart-ai-modify-btn" data-chart-ai-idx="${idx}" title="AI Modify this chart">
@@ -354,6 +372,7 @@
         // ── Data Table ────────────────────────────────────────────────────
         const table = report.table;
         if (table && table.data && table.data.length > 0) {
+            const tableExplainData = table.explanation ? {...table.explanation, sql: table.sql || ""} : null;
             html += `<div class="report-section-label label-table stream-section">
                 <div class="report-section-label-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
@@ -364,7 +383,7 @@
                 <div class="report-table-header">
                     <span class="report-table-title">${escapeHtml(table.title || "Detail Data")}</span>
                     <span class="row-badge">${table.data.length} row${table.data.length !== 1 ? "s" : ""}</span>
-                    ${table.explanation ? `<button class="kpi-eye-btn" data-explain='${escapeAttr(JSON.stringify(table.explanation))}' data-title="${escapeAttr(table.title || "Data Table")}">
+                    ${tableExplainData ? `<button class="kpi-eye-btn" data-explain='${escapeAttr(JSON.stringify(tableExplainData))}' data-title="${escapeAttr(table.title || "Data Table")}">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                     </button>` : ""}
                 </div>
@@ -1521,6 +1540,10 @@
                 key: "insight", label: "KEY INSIGHT", cls: "insight",
                 icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 017 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 01-1 1H9a1 1 0 01-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 017-7z"/><line x1="9" y1="21" x2="15" y2="21"/></svg>`,
             },
+            {
+                key: "sql", label: "SQL QUERY USED", cls: "sql",
+                icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>`,
+            },
         ];
 
         const available = sections.filter(s => explanation[s.key]);
@@ -1531,7 +1554,10 @@
                 <div class="explain-section-icon icon-${s.cls}">${s.icon}</div>
                 <div class="explain-section-content">
                     <div class="explain-section-label-v2 lbl-${s.cls}">${s.label}</div>
-                    <div class="explain-section-text-v2">${escapeHtml(explanation[s.key])}</div>
+                    ${s.key === "sql"
+                        ? `<pre class="explain-sql-block"><code>${escapeHtml(explanation[s.key])}</code></pre>`
+                        : `<div class="explain-section-text-v2">${escapeHtml(explanation[s.key])}</div>`
+                    }
                 </div>
             </div>`;
         });

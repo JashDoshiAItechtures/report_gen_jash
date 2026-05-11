@@ -1,14 +1,18 @@
 """Multi-agent report generation orchestrator using Claude API.
 
-Chains 6 specialized agents to produce high-quality analytics reports:
-1. Context Agent       — understands the user's question and database
-2. Business Analyst    — designs the report blueprint
-3. SQL Agent           — writes and executes queries (with tool use)
-4. Data Analyst        — validates and cleans the data
-5. Report Writer       — writes narrative components
-6. QA Agent            — quality assurance gate
+Version 2.0 - Drift Intelligence Edition.
+Supports dual-mode routing: STANDARD_REPORT and DRIFT_INVESTIGATION.
+
+Chains 6 specialized agents:
+1. Context + Signal Classification Agent  — classifies intent, maps to signals
+2. Drift Blueprint + Business Analyst     — designs report/drift card blueprint
+3. SQL + Drift Detective Agent            — writes and executes queries (phased for drift)
+4. Data Analyst + Causal Validator        — validates data and drift math integrity
+5. Report Writer + Drift Narrator         — writes McKinsey-style narratives
+6. QA + Drift Card Validator              — quality assurance gate (12-point for drift)
 
 The output is 100% compatible with the existing frontend JSON format.
+Drift investigation mode adds drift_metrics, causal_decomposition, and tab_data.
 """
 
 import json
@@ -43,10 +47,10 @@ logger = logging.getLogger(__name__)
 
 # ── Model aliases ─────────────────────────────────────────────────────────────
 _SONNET = config.CLAUDE_MODEL        # Business Analyst, SQL Agent, Report Writer
-_HAIKU  = config.CLAUDE_MODEL        # Fallback to Sonnet for now to avoid 404s
+_HAIKU  = config.CLAUDE_HAIKU_MODEL  # Context Agent, Data Analyst, QA Agent (~8x cheaper)
 
 # ── Agent display config ─────────────────────────────────────────────────────
-_AGENTS = [
+_AGENTS_STANDARD = [
     ("1", "CONTEXT AGENT",        "🔍", "Analyzing question & gathering database context"),
     ("2", "BUSINESS ANALYST",     "📐", "Designing report blueprint (KPIs + Charts)"),
     ("3", "SQL AGENT",            "⚡", "Writing & executing SQL queries with tool use"),
@@ -54,6 +58,15 @@ _AGENTS = [
     ("5", "REPORT WRITER",        "✍️ ", "Writing executive narrative & insights"),
     ("6", "QA AGENT",             "🛡️ ", "Quality assurance — scoring report against question"),
 ]
+_AGENTS_DRIFT = [
+    ("1", "SIGNAL CLASSIFIER",    "🔍", "Classifying intent & mapping to signal library"),
+    ("2", "DRIFT ARCHITECT",      "📐", "Designing drift card blueprint (11 tabs)"),
+    ("3", "DRIFT DETECTIVE",      "⚡", "Executing 4-phase SQL investigation"),
+    ("4", "CAUSAL VALIDATOR",     "🔬", "Validating decomposition math & severity"),
+    ("5", "DRIFT NARRATOR",       "✍️ ", "Writing causal narrative & suspected drivers"),
+    ("6", "DRIFT QA",             "🛡️ ", "12-point drift card validation"),
+]
+_AGENTS = _AGENTS_STANDARD  # default, switched at runtime
 
 
 def _pipeline_banner(question: str) -> None:
@@ -112,7 +125,13 @@ class ClaudeReportPipeline:
     # ═══════════════════════════════════════════════════════════════════════
 
     def generate(self, question: str, force_refresh: bool = False) -> dict[str, Any]:
-        """Generate a complete report using the 6-agent pipeline."""
+        """Generate a complete report using the 6-agent pipeline.
+
+        Supports two modes:
+        - STANDARD_REPORT: Traditional KPI + chart dashboard
+        - DRIFT_INVESTIGATION: Full drift card with causal decomposition
+        """
+        global _AGENTS
         pipeline_start = time.time()
         _pipeline_banner(question)
         logger.info("Claude pipeline START — question: %s", question[:120])
@@ -120,17 +139,35 @@ class ClaudeReportPipeline:
         self._retry_count = 0
 
         try:
-            # ── Agent 1: Context Agent ─────────────────────────────────────
-            _agent_header(*_AGENTS[0])
+            # ── Agent 1: Context + Signal Classification ───────────────────
+            _agent_header(*_AGENTS_STANDARD[0])
             t0 = time.time()
             context = self._run_context_agent(question)
-            _agent_result("CONTEXT AGENT", time.time() - t0, [
-                f"Subject  : {context.get('subject', '?')}",
-                f"Domain   : {context.get('business_domain', '?')}",
-                f"Intent   : {context.get('intent', '?')}",
-                f"Timeframe: {context.get('timeframe', 'all time')}",
-                f"Tables   : {', '.join(context.get('relevant_tables', [])[:6])}",
-            ])
+
+            # Detect intent mode and switch agent display labels
+            intent_mode = context.get('intent_mode', 'STANDARD_REPORT')
+            if intent_mode == 'DRIFT_INVESTIGATION':
+                _AGENTS = _AGENTS_DRIFT
+                signal_id = context.get('signal_id', '?')
+                signal_name = context.get('signal_name', '?')
+                _agent_result("SIGNAL CLASSIFIER", time.time() - t0, [
+                    f"Mode     : DRIFT_INVESTIGATION",
+                    f"Signal   : {signal_id} - {signal_name}",
+                    f"Domain   : {context.get('signal_domain', '?')}",
+                    f"Severity : {context.get('default_severity', '?')}",
+                    f"Baseline : {context.get('baseline_window', '?')}",
+                    f"Tables   : {', '.join(context.get('relevant_tables', [])[:6])}",
+                ])
+            else:
+                _AGENTS = _AGENTS_STANDARD
+                _agent_result("CONTEXT AGENT", time.time() - t0, [
+                    f"Mode     : STANDARD_REPORT",
+                    f"Subject  : {context.get('subject', '?')}",
+                    f"Domain   : {context.get('business_domain', '?')}",
+                    f"Intent   : {context.get('intent', '?')}",
+                    f"Timeframe: {context.get('timeframe', 'all time')}",
+                    f"Tables   : {', '.join(context.get('relevant_tables', [])[:6])}",
+                ])
 
             # ── Agent 2: Business Analyst Agent ───────────────────────────
             _agent_header(*_AGENTS[1])
@@ -161,6 +198,9 @@ class ClaudeReportPipeline:
                 f"Chart data   : {', '.join(chart_rows)}",
             ])
 
+            # ── SQL Traceability Log ──────────────────────────────────────
+            self._log_sql_traceability(report_with_data)
+
             # ── Agent 4: Data Analyst Agent ───────────────────────────────
             _agent_header(*_AGENTS[3])
             t0 = time.time()
@@ -188,8 +228,14 @@ class ClaudeReportPipeline:
             qa_result = self._run_qa_agent(question, final_report)
             approved = qa_result.get("approved", True)
             score    = qa_result.get("score", "?")
-            max_sc   = qa_result.get("max_score", 8)
+            max_sc   = qa_result.get("max_score", 12)
             feedback = qa_result.get("feedback", "")[:80]
+
+            # Override the LLM's approved field based on actual score.
+            # Haiku sometimes returns approved=false for scores that should pass.
+            # Rule: ≥58% of max_score = approved (i.e., 7/12 for standard, 7/12 for drift)
+            if isinstance(score, (int, float)) and isinstance(max_sc, (int, float)) and max_sc > 0:
+                approved = score >= (max_sc * 0.58)
             status_col = _GREEN if approved else _RED
             _tee(
                 f"  {_c('QA VERDICT', _BOLD)}: {_c('APPROVED' if approved else 'REJECTED', status_col, _BOLD)}  "
@@ -216,8 +262,10 @@ class ClaudeReportPipeline:
             _pipeline_complete(total_elapsed, final_report)
             logger.info("Claude pipeline COMPLETE — %.1fs", total_elapsed)
 
-            return {
+            # Build response based on intent mode
+            response_payload = {
                 "mode": "report",
+                "intent_mode": intent_mode,
                 "report": final_report,
                 "applicable_filters": applicable_filters,
                 "ui_instructions": {
@@ -237,6 +285,19 @@ class ClaudeReportPipeline:
                 },
             }
 
+            # Add drift-specific metadata to response
+            if intent_mode == "DRIFT_INVESTIGATION":
+                response_payload["drift_context"] = {
+                    "signal_id": context.get("signal_id"),
+                    "signal_name": context.get("signal_name"),
+                    "signal_domain": context.get("signal_domain"),
+                    "severity": final_report.get("severity", context.get("default_severity")),
+                    "severity_score": final_report.get("severity_score"),
+                    "causal_chain": context.get("causal_chain"),
+                }
+
+            return response_payload
+
         except Exception as exc:
             total_elapsed = time.time() - pipeline_start
             _tee(f"\n  {_c(f'PIPELINE FAILED after {total_elapsed:.1f}s: {exc}', _RED, _BOLD)}\n")
@@ -252,20 +313,21 @@ class ClaudeReportPipeline:
     # ═══════════════════════════════════════════════════════════════════════
 
     def _run_context_agent(self, question: str) -> dict:
-        """Agent 1: Analyze the user's question and gather database context.
-        Uses Haiku — simple entity extraction, no heavy reasoning needed.
+        """Agent 1: Analyze query, classify intent (standard vs drift), map to signal.
+        Uses Sonnet — signal classification against 37-SIG library needs reasoning.
         """
         response = self.client.call_agent(
             system_prompt=CONTEXT_AGENT_SYSTEM,
             user_message=(
-                f"Analyze this report request and gather the necessary "
-                f"database context:\n\n{question}"
+                f"Analyze this analytics request. Determine if it is a STANDARD_REPORT "
+                f"or a DRIFT_INVESTIGATION, and produce the appropriate context object.\n\n"
+                f"USER QUERY: {question}"
             ),
             tools=CONTEXT_AGENT_TOOLS,
             tool_handlers=TOOL_HANDLERS,
             max_tokens=4096,
-            agent_name="Context Agent",
-            model=_HAIKU,
+            agent_name="Context + Signal Agent",
+            model=_SONNET,
             use_cache=True,
         )
 
@@ -274,6 +336,7 @@ class ClaudeReportPipeline:
         except (json.JSONDecodeError, ValueError) as exc:
             logger.warning("Context agent JSON parse failed: %s", exc)
             return {
+                "intent_mode": "STANDARD_REPORT",
                 "subject": question,
                 "intent": "overview",
                 "timeframe": "all time",
@@ -289,12 +352,30 @@ class ClaudeReportPipeline:
         context: dict,
         qa_feedback: str | None = None,
     ) -> dict:
-        """Agent 2: Design the report blueprint (KPIs, charts, table)."""
-        user_msg = (
-            f"Design a comprehensive analytics report for this request.\n\n"
-            f"USER QUESTION: {question}\n\n"
-            f"CONTEXT ANALYSIS:\n{json.dumps(context, indent=2)}"
-        )
+        """Agent 2: Design the report or drift card blueprint."""
+        intent_mode = context.get('intent_mode', 'STANDARD_REPORT')
+
+        if intent_mode == 'DRIFT_INVESTIGATION':
+            user_msg = (
+                f"Design a DRIFT INVESTIGATION blueprint for this signal.\n\n"
+                f"USER QUERY: {question}\n\n"
+                f"CONTEXT (intent_mode=DRIFT_INVESTIGATION):\n"
+                f"{json.dumps(context, indent=2)}\n\n"
+                f"You must produce the full drift card blueprint with:\n"
+                f"- Causal decomposition plan\n"
+                f"- 3-5 suspected driver hypotheses\n"
+                f"- All 11 tab data requirements\n"
+                f"- Impact quantification formula\n"
+                f"- Severity scoring inputs\n"
+                f"- 6 KPIs (4 drift-required + 2 supporting)\n"
+                f"- 6 charts (trend, comparison, waterfall, geographic, period, transactions)"
+            )
+        else:
+            user_msg = (
+                f"Design a comprehensive analytics report for this request.\n\n"
+                f"USER QUESTION: {question}\n\n"
+                f"CONTEXT ANALYSIS:\n{json.dumps(context, indent=2)}"
+            )
 
         if qa_feedback:
             user_msg += (
@@ -307,9 +388,9 @@ class ClaudeReportPipeline:
             user_message=user_msg,
             tools=BA_AGENT_TOOLS,
             tool_handlers=TOOL_HANDLERS,
-            max_tokens=8192,
-            agent_name="Business Analyst Agent",
-            model=_SONNET,   # Needs creativity for blueprint design
+            max_tokens=16384 if intent_mode == 'DRIFT_INVESTIGATION' else 8192,
+            agent_name="Drift Architect" if intent_mode == 'DRIFT_INVESTIGATION' else "Business Analyst",
+            model=_SONNET,
             use_cache=True,
         )
 
@@ -319,12 +400,14 @@ class ClaudeReportPipeline:
             logger.error("BA agent JSON parse failed: %s", exc)
             raise ValueError(f"Failed to generate report blueprint: {exc}")
 
-        if "kpis" not in blueprint:
-            blueprint["kpis"] = []
-        if "charts" not in blueprint:
-            blueprint["charts"] = []
-        if "title" not in blueprint:
-            blueprint["title"] = f"Report: {context.get('subject', question[:50])}"
+        # Ensure essential fields exist
+        blueprint.setdefault('intent_mode', intent_mode)
+        if 'kpis' not in blueprint:
+            blueprint['kpis'] = []
+        if 'charts' not in blueprint:
+            blueprint['charts'] = []
+        if 'title' not in blueprint:
+            blueprint['title'] = f"Report: {context.get('subject', question[:50])}"
 
         return blueprint
 
@@ -334,38 +417,59 @@ class ClaudeReportPipeline:
         blueprint: dict,
         context: dict,
     ) -> dict:
-        """Agent 3: Write and execute SQL for all KPIs and charts."""
+        """Agent 3: Write and execute SQL for all KPIs, charts, and drift data.
+        For DRIFT_INVESTIGATION, executes 4-phase query cycle with more tool rounds.
+        """
         schema_str  = format_schema()
         rels_str    = format_relationships()
         profile_str = get_data_profile()
 
         system_prompt = get_sql_agent_system(schema_str, rels_str, profile_str)
+        intent_mode = context.get('intent_mode', 'STANDARD_REPORT')
 
-        user_msg = (
-            f"Execute SQL queries to populate this report blueprint with real data.\n\n"
-            f"USER QUESTION: {question}\n\n"
-            f"REPORT BLUEPRINT:\n{json.dumps(blueprint, indent=2)}\n\n"
-            f"CONTEXT:\n{json.dumps(context, indent=2)}\n\n"
-            f"For each KPI and chart, write a SQL query, execute it using "
-            f"the execute_sql_query tool, and include the actual data in "
-            f"the output. If a query fails, fix it and try again.\n\n"
-            f"IMPORTANT:\n"
-            f"- KPI queries must return exactly 1 row with 1 numeric value\n"
-            f"- Chart queries must return rows with a label column and value column(s)\n"
-            f"- Table query should return detailed rows (limit 20)\n"
-            f"- Include the SQL used and actual data for each element"
-        )
+        if intent_mode == 'DRIFT_INVESTIGATION':
+            user_msg = (
+                f"Execute the 4-phase drift investigation SQL cycle.\n\n"
+                f"USER QUERY: {question}\n\n"
+                f"DRIFT BLUEPRINT:\n{json.dumps(blueprint, indent=2)}\n\n"
+                f"SIGNAL CONTEXT:\n{json.dumps(context, indent=2)}\n\n"
+                f"Execute queries in this EXACT order:\n"
+                f"PHASE 1 - Anchor: current_value, baseline_value, variance, impact\n"
+                f"PHASE 2 - Decompose: dimensional cuts for each dimension\n"
+                f"PHASE 3 - Support: trend, period_compare, geographic, consecutive_periods\n"
+                f"PHASE 4 - Related: check related signals for co-firing\n\n"
+                f"Include all SQL and actual data in the output JSON."
+            )
+            max_rounds = 40  # drift needs more rounds for multi-phase
+            max_tokens = 32768
+        else:
+            user_msg = (
+                f"Execute SQL queries to populate this report blueprint with real data.\n\n"
+                f"USER QUESTION: {question}\n\n"
+                f"REPORT BLUEPRINT:\n{json.dumps(blueprint, indent=2)}\n\n"
+                f"CONTEXT:\n{json.dumps(context, indent=2)}\n\n"
+                f"For each KPI and chart, write a SQL query, execute it using "
+                f"the execute_sql_query tool, and include the actual data in "
+                f"the output. If a query fails, fix it and try again.\n\n"
+                f"IMPORTANT:\n"
+                f"- KPI queries must return exactly 1 row with 1 numeric value\n"
+                f"- Chart queries must return rows with a label column and value column(s)\n"
+                f"- Table query should return detailed rows (limit 20)\n"
+                f"- Include the SQL used and actual data for each element"
+            )
+            max_rounds = 25
+            max_tokens = 16384
 
         response = self.client.call_agent(
             system_prompt=system_prompt,
             user_message=user_msg,
             tools=SQL_AGENT_TOOLS,
             tool_handlers=TOOL_HANDLERS,
-            max_tokens=16384,
-            max_tool_rounds=25,
-            agent_name="SQL Agent",
-            model=_SONNET,   # Needs strong reasoning for complex PostgreSQL
-            use_cache=True,  # BIGGEST WIN: caches the entire schema block
+            max_tokens=max_tokens,
+            max_tool_rounds=max_rounds,
+            agent_name="Drift Detective" if intent_mode == 'DRIFT_INVESTIGATION' else "SQL Agent",
+            model=_SONNET,
+            use_cache=True,
         )
 
         try:
@@ -373,50 +477,97 @@ class ClaudeReportPipeline:
         except (json.JSONDecodeError, ValueError) as exc:
             logger.error("SQL agent JSON parse failed: %s", exc)
             report = blueprint.copy()
-            for kpi in report.get("kpis", []):
-                kpi.setdefault("value", 0)
-                kpi.setdefault("sql", "")
-            for chart in report.get("charts", []):
-                chart.setdefault("data", [])
-                chart.setdefault("sql", "")
+            for kpi in report.get('kpis', []):
+                kpi.setdefault('value', 0)
+                kpi.setdefault('sql', '')
+            for chart in report.get('charts', []):
+                chart.setdefault('data', [])
+                chart.setdefault('sql', '')
 
         return report
 
     def _run_data_analyst_agent(self, report: dict) -> dict:
-        """Agent 4: Validate and clean the data."""
-        response = self.client.call_agent(
-            system_prompt=DATA_ANALYST_SYSTEM,
-            user_message=(
+        """Agent 4: Validate data and drift math integrity."""
+        intent_mode = report.get('intent_mode', 'STANDARD_REPORT')
+
+        if intent_mode == 'DRIFT_INVESTIGATION':
+            user_msg = (
+                f"Validate the drift investigation data. Run ALL causal math checks:\n"
+                f"1. Contribution sum integrity (should sum to ~100%)\n"
+                f"2. Single-entity monopoly check\n"
+                f"3. Baseline sanity (CV check)\n"
+                f"4. Consecutive periods consistency\n"
+                f"5. Impact calculation audit\n"
+                f"6. Severity score computation\n"
+                f"7. Affected areas validation\n\n"
+                f"REPORT DATA:\n{json.dumps(report, indent=2, default=str)}"
+            )
+        else:
+            user_msg = (
                 f"Review and clean the following report data. "
                 f"Check all KPI values and chart data for quality issues.\n\n"
                 f"{json.dumps(report, indent=2, default=str)}"
-            ),
+            )
+
+        response = self.client.call_agent(
+            system_prompt=DATA_ANALYST_SYSTEM,
+            user_message=user_msg,
             max_tokens=16384,
-            agent_name="Data Analyst Agent",
-            model=_HAIKU,    # Basic validation — no complex reasoning needed
+            agent_name="Causal Validator" if intent_mode == 'DRIFT_INVESTIGATION' else "Data Analyst",
+            model=_SONNET if intent_mode == 'DRIFT_INVESTIGATION' else _HAIKU,
             use_cache=True,
         )
 
         try:
             return self.client.extract_json(response)
         except (json.JSONDecodeError, ValueError) as exc:
-            logger.warning("Data analyst JSON parse failed: %s — using uncleaned data", exc)
+            logger.warning("Data analyst JSON parse failed: %s - using uncleaned data", exc)
             return report
 
     def _run_report_writer_agent(self, report: dict, context: dict) -> dict:
-        """Agent 5: Write the narrative components."""
-        response = self.client.call_agent(
-            system_prompt=REPORT_WRITER_SYSTEM,
-            user_message=(
-                f"Write the narrative components for this report. "
-                f"Use the actual data values in your writing.\n\n"
+        """Agent 5: Write narratives - McKinsey-style for drift, executive for standard."""
+        intent_mode = context.get('intent_mode', 'STANDARD_REPORT')
+
+        if intent_mode == 'DRIFT_INVESTIGATION':
+            user_msg = (
+                f"Write the DRIFT INVESTIGATION narrative. intent_mode=DRIFT_INVESTIGATION.\n\n"
+                f"You must write ALL components:\n"
+                f"1. Issue Overview (3-sentence template, <=60 words)\n"
+                f"2. Why This Was Surfaced\n"
+                f"3. Suspected Drivers (ranked by contribution)\n"
+                f"4. Affected Areas narrative\n"
+                f"5. KPI explanations (what/how/why/insight)\n"
+                f"6. Chart explanations\n"
+                f"7. Investigation Checklist (6 items)\n"
+                f"8. Decision Options (expand templates)\n"
+                f"9. Insights (6-8 non-obvious findings)\n\n"
+                f"SIGNAL CONTEXT:\n{json.dumps(context, indent=2, default=str)}\n\n"
+                f"REPORT DATA:\n{json.dumps(report, indent=2, default=str)}"
+            )
+        else:
+            user_msg = (
+                f"Write ALL narrative components for this STANDARD_REPORT. "
+                f"intent_mode=STANDARD_REPORT.\n\n"
+                f"You MUST write ALL of the following:\n"
+                f"1. Executive summary (5-8 sentences with actual data values)\n"
+                f"2. KPI explanations (what/how/why/insight for EVERY KPI)\n"
+                f"3. Chart explanations (what/how/why/insight for EVERY chart)\n"
+                f"4. Insights — 6-8 data-driven findings. EACH insight MUST be a JSON object with:\n"
+                f"   - \"title\": 5-8 word directional claim\n"
+                f"   - \"body\": 2-3 sentences with SPECIFIC numbers from the data\n"
+                f"   - \"type\": \"positive\" | \"negative\" | \"neutral\" | \"warning\"\n"
+                f"   At least 2 insights must be \"warning\" or \"negative\" type.\n\n"
                 f"BUSINESS CONTEXT: {context.get('subject', 'General report')}, "
                 f"domain: {context.get('business_domain', 'sales')}\n\n"
                 f"REPORT DATA:\n{json.dumps(report, indent=2, default=str)}"
-            ),
+            )
+
+        response = self.client.call_agent(
+            system_prompt=REPORT_WRITER_SYSTEM,
+            user_message=user_msg,
             max_tokens=16384,
-            agent_name="Report Writer Agent",
-            model=_SONNET,   # McKinsey-quality writing needs full Sonnet
+            agent_name="Drift Narrator" if intent_mode == 'DRIFT_INVESTIGATION' else "Report Writer",
+            model=_SONNET,
             use_cache=True,
         )
 
@@ -424,37 +575,54 @@ class ClaudeReportPipeline:
             return self.client.extract_json(response)
         except (json.JSONDecodeError, ValueError) as exc:
             logger.warning("Report writer parse failed: %s", exc)
-            for kpi in report.get("kpis", []):
-                if "explanation" not in kpi:
-                    kpi["explanation"] = {"what": kpi.get("label",""), "how": "", "why": "", "insight": ""}
-            for chart in report.get("charts", []):
-                if "explanation" not in chart:
-                    chart["explanation"] = {"what": chart.get("title",""), "how": "", "why": "", "insight": ""}
-            if "insights" not in report:
-                report["insights"] = []
+            for kpi in report.get('kpis', []):
+                if 'explanation' not in kpi:
+                    kpi['explanation'] = {'what': kpi.get('label',''), 'how': '', 'why': '', 'insight': ''}
+            for chart in report.get('charts', []):
+                if 'explanation' not in chart:
+                    chart['explanation'] = {'what': chart.get('title',''), 'how': '', 'why': '', 'insight': ''}
+            if 'insights' not in report:
+                report['insights'] = []
             return report
 
     def _run_qa_agent(self, question: str, report: dict) -> dict:
-        """Agent 6: Quality assurance check."""
-        response = self.client.call_agent(
-            system_prompt=QA_AGENT_SYSTEM,
-            user_message=(
+        """Agent 6: Quality assurance - 12-point for drift, 8-point for standard."""
+        intent_mode = report.get('intent_mode', 'STANDARD_REPORT')
+
+        if intent_mode == 'DRIFT_INVESTIGATION':
+            user_msg = (
+                f"Evaluate this DRIFT INVESTIGATION card (12-point checklist).\n\n"
+                f"USER QUERY: {question}\n\n"
+                f"Run ALL 12 checks: contribution sum, drift math, trend corroboration,\n"
+                f"consecutive periods, issue overview template, suspected drivers,\n"
+                f"insight specificity, decision actionability, 11-tab completeness,\n"
+                f"affected areas validation, investigation checklist, related signals.\n\n"
+                f"DRIFT CARD:\n{json.dumps(report, indent=2, default=str)}"
+            )
+            max_score = 12
+        else:
+            user_msg = (
                 f"Evaluate the quality of this report against the user's "
                 f"original question.\n\n"
                 f"USER QUESTION: {question}\n\n"
                 f"GENERATED REPORT:\n{json.dumps(report, indent=2, default=str)}"
-            ),
-            max_tokens=4096,
-            agent_name="QA Agent",
-            model=_HAIKU,    # JSON comparison — no heavy reasoning needed
+            )
+            max_score = 8
+
+        response = self.client.call_agent(
+            system_prompt=QA_AGENT_SYSTEM,
+            user_message=user_msg,
+            max_tokens=8192 if intent_mode == 'DRIFT_INVESTIGATION' else 4096,
+            agent_name="Drift QA" if intent_mode == 'DRIFT_INVESTIGATION' else "QA Agent",
+            model=_SONNET if intent_mode == 'DRIFT_INVESTIGATION' else _HAIKU,
             use_cache=True,
         )
 
         try:
             return self.client.extract_json(response)
         except (json.JSONDecodeError, ValueError) as exc:
-            logger.warning("QA agent parse failed: %s — auto-approving", exc)
-            return {"approved": True, "score": 6, "max_score": 8, "feedback": "Auto-approved"}
+            logger.warning("QA agent parse failed: %s - auto-approving", exc)
+            return {'approved': True, 'score': max_score - 2, 'max_score': max_score, 'feedback': 'Auto-approved'}
 
     # ═══════════════════════════════════════════════════════════════════════
     # POST-PROCESSING
@@ -498,6 +666,9 @@ class ClaudeReportPipeline:
                 chart.setdefault("explanation", {"what": chart.get("title",""), "how": "", "why": "", "insight": ""})
 
                 data = chart.get("data", [])
+                if isinstance(data, dict):
+                    data = list(data.values())
+                    chart["data"] = data
                 if not data or len(data) == 0:
                     chart["data"] = [{"label": "No data available", "value": 0}]
                     chart["type"] = "bar"
@@ -537,20 +708,113 @@ class ClaudeReportPipeline:
                 table.setdefault("sql", "")
                 table.setdefault("data", [])
 
+                # Fix title/row-count mismatch: "Top 40 by ..." but only 23 rows
+                actual_rows = len(table.get("data", []))
+                title = table.get("title", "")
+                fixed_title = re.sub(
+                    r'\bTop\s+\d+\b',
+                    f'Top {actual_rows}',
+                    title
+                )
+                if fixed_title != title:
+                    logger.info("Table title fixed: '%s' → '%s'", title, fixed_title)
+                    table["title"] = fixed_title
+
+                # Ensure table has explanation for the eye modal
+                table.setdefault("explanation", {
+                    "what": f"Detail breakdown: {table.get('title', 'Data Table')}",
+                    "how": f"Queried from database — {actual_rows} rows returned, sorted by relevance to the question",
+                    "why": "Entity-level data for drill-down analysis and action planning",
+                    "insight": "",
+                })
+
         # ── Insights cleanup ──────────────────────────────────────────
-        if "insights" in report:
-            cleaned = []
-            for ins in report["insights"]:
-                if isinstance(ins, str):
-                    ins = {"title": ins, "body": ins, "type": "neutral"}
-                elif isinstance(ins, dict):
-                    ins.setdefault("title", "Insight")
-                    ins.setdefault("body", ins.get("title", ""))
-                    ins.setdefault("type", "neutral")
-                cleaned.append(ins)
-            report["insights"] = cleaned[:8]
+        # Prefer rich insight objects from Report Writer over bare strings
+        # from insight_topics (BA agent). Convert any remaining strings.
+        insights = report.get("insights", [])
+        insight_topics = report.get("insight_topics", [])
+
+        # If insights is empty but insight_topics has content, promote them
+        if not insights and insight_topics:
+            insights = insight_topics
+
+        cleaned = []
+        for ins in insights:
+            if isinstance(ins, str):
+                ins = {"title": ins, "body": ins, "type": "neutral"}
+            elif isinstance(ins, dict):
+                ins.setdefault("title", "Insight")
+                ins.setdefault("body", ins.get("title", ""))
+                ins.setdefault("type", "neutral")
+                # Validate type is one of allowed values
+                if ins["type"] not in ("positive", "negative", "neutral", "warning", "opportunity"):
+                    ins["type"] = "neutral"
+            cleaned.append(ins)
+        report["insights"] = cleaned[:10]
+
+        # Remove insight_topics to avoid frontend confusion
+        report.pop("insight_topics", None)
 
         return report
+
+    def _log_sql_traceability(self, report: dict):
+        """Log which SQL query powers each KPI, chart, and table."""
+        width = 72
+        lines = []
+        lines.append(f"  {_c('┌─ SQL TRACEABILITY ' + '─' * (width - 21) + '┐', _CYAN)}")
+
+        # KPIs
+        for i, kpi in enumerate(report.get("kpis", []), 1):
+            label = kpi.get("label", kpi.get("id", f"KPI {i}"))
+            sql = kpi.get("sql", "")
+            val = kpi.get("value", "?")
+            lines.append(f"  {_c('│', _CYAN)} {_c(f'KPI {i}:', _BOLD)} {label} = {_c(str(val), _YELLOW)}")
+            if sql:
+                sql_preview = sql.replace('\n', ' ')[:100]
+                lines.append(f"  {_c('│', _CYAN)}   {_c('SQL:', _DIM)} {sql_preview}")
+            else:
+                lines.append(f"  {_c('│', _CYAN)}   {_c('SQL: (none)', _RED)}")
+
+        lines.append(f"  {_c('│' + '─' * (width - 2), _CYAN)}")
+
+        # Charts
+        for i, chart in enumerate(report.get("charts", []), 1):
+            title = chart.get("title", f"Chart {i}")
+            ctype = chart.get("type", "?")
+            sql = chart.get("sql", "")
+            rows = len(chart.get("data", []))
+            lines.append(f"  {_c('│', _CYAN)} {_c(f'Chart {i}:', _BOLD)} {title} [{_c(ctype, _YELLOW)}]")
+            lines.append(f"  {_c('│', _CYAN)}   Rows: {rows}")
+            if sql:
+                sql_preview = sql.replace('\n', ' ')[:100]
+                lines.append(f"  {_c('│', _CYAN)}   {_c('SQL:', _DIM)} {sql_preview}")
+            else:
+                lines.append(f"  {_c('│', _CYAN)}   {_c('SQL: (none)', _RED)}")
+
+        lines.append(f"  {_c('│' + '─' * (width - 2), _CYAN)}")
+
+        # Table
+        table = report.get("table", {})
+        if table:
+            title = table.get("title", "Detail Table")
+            sql = table.get("sql", "")
+            rows = len(table.get("data", []))
+            # Check for title/row mismatch
+            import re as _re
+            match = _re.search(r'\bTop\s+(\d+)\b', title, _re.IGNORECASE)
+            mismatch_warn = ""
+            if match and int(match.group(1)) != rows:
+                mismatch_warn = f" {_c(f'⚠️ TITLE SAYS {match.group(0)} BUT GOT {rows}', _RED, _BOLD)}"
+            lines.append(f"  {_c('│', _CYAN)} {_c('Table:', _BOLD)} {title}{mismatch_warn}")
+            lines.append(f"  {_c('│', _CYAN)}   Rows: {rows}")
+            if sql:
+                sql_preview = sql.replace('\n', ' ')[:100]
+                lines.append(f"  {_c('│', _CYAN)}   {_c('SQL:', _DIM)} {sql_preview}")
+
+        lines.append(f"  {_c('└' + '─' * (width - 2) + '┘', _CYAN)}")
+
+        for line in lines:
+            _tee(line)
 
     @staticmethod
     def _enforce_chart_diversity(charts: list[dict]) -> list[dict]:

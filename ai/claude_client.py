@@ -127,7 +127,39 @@ class ClaudeClient:
             if tools:
                 kwargs["tools"] = tools
 
-            response = self._client.messages.create(**kwargs)
+            # Retry loop for transient Anthropic errors (500, 529 Overloaded)
+            max_retries = 4
+            for attempt in range(max_retries + 1):
+                try:
+                    response = self._client.messages.create(**kwargs)
+                    break  # success
+                except anthropic.InternalServerError as e:
+                    if attempt < max_retries:
+                        wait = 2 ** (attempt + 1)  # 2, 4, 8, 16 seconds
+                        _tee(
+                            f"  {_c(f'⚠ API 500 — retry {attempt+1}/{max_retries} in {wait}s', _YELLOW, _BOLD)}"
+                        )
+                        logger.warning("API 500 error, retry %d/%d in %ds: %s", attempt+1, max_retries, wait, e)
+                        time.sleep(wait)
+                    else:
+                        raise
+                except anthropic.APIStatusError as e:
+                    if e.status_code == 529 and attempt < max_retries:
+                        wait = 2 ** (attempt + 1)
+                        _tee(
+                            f"  {_c(f'⚠ API Overloaded (529) — retry {attempt+1}/{max_retries} in {wait}s', _YELLOW, _BOLD)}"
+                        )
+                        logger.warning("API 529 overloaded, retry %d/%d in %ds", attempt+1, max_retries, wait)
+                        time.sleep(wait)
+                    elif e.status_code == 429 and attempt < max_retries:
+                        wait = 2 ** (attempt + 2)  # longer wait for rate limits: 4, 8, 16, 32
+                        _tee(
+                            f"  {_c(f'⚠ Rate limited (429) — retry {attempt+1}/{max_retries} in {wait}s', _YELLOW, _BOLD)}"
+                        )
+                        logger.warning("API 429 rate limited, retry %d/%d in %ds", attempt+1, max_retries, wait)
+                        time.sleep(wait)
+                    else:
+                        raise
 
             # Log cache usage if available
             usage = getattr(response, "usage", None)
